@@ -19,4 +19,8 @@
     <DebugType>none</DebugType>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="karenot.png" LogicalName="KareNot.karenot.png" />
+  </ItemGroup>
+
 </Project>

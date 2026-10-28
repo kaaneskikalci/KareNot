@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  #catch { position: fixed; inset: 0; display: none; cursor: crosshair; background: rgba(0, 0, 0, 0.001); }
+  body.on #catch { display: block; }
+  #box { position: fixed; display: none; border: 3px solid #FF0000; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); pointer-events: none; }
+  #hint { position: fixed; top: 10px; left: 10px; display: none; padding: 4px 9px; border-radius: 4px; pointer-events: none;
+    background: rgba(0, 0, 0, 0.66); color: #fff; font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+  body.on #hint { display: block; }
+</style>
+</head>
+<body>
+  <div id="catch" data-clickable></div>
+  <div id="box"></div>
+  <div id="hint">Alanı sürükle · iptal: KareNot panelinde "Alan" butonu ya da Esc</div>
+  <script src="overlay.js"></script>
+</body>
+</html>

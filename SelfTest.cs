@@ -12,6 +12,8 @@ sealed partial class MainForm
     delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extra);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point p);
 
     public async Task RunSelfTest(string logPath, string video)
     {
@@ -82,6 +84,10 @@ sealed partial class MainForm
             var oldCursor = Cursor.Position;
             SetCursorPos(videoPanel.PointToScreen(a).X, videoPanel.PointToScreen(a).Y);
             await Wait(150);
+            var under = WindowFromPoint(videoPanel.PointToScreen(a));
+            var name = new StringBuilder(128);
+            GetClassName(under, name, name.Capacity);
+            Info($"before drag: foreground={(GetForegroundWindow() == Handle ? "KareNot" : "other")}, under cursor={name} {(under == videoPanel.Handle ? "(videoPanel)" : "")}");
             mouse_event(0x0002, 0, 0, 0, IntPtr.Zero);
             await Wait(150);
             SetCursorPos(videoPanel.PointToScreen(a).X + 30, videoPanel.PointToScreen(a).Y + 30);
@@ -138,10 +144,12 @@ sealed partial class MainForm
             var kinds = CurrentNotes().Select(n => n.Kind).ToList();
             Check(kinds.Count == 6, "6 notes in list: " + string.Join(",", kinds));
             Check(store.All.Where(n => n.Kind is "BIP" or "KES_BASLA" or "KES_BITIR").All(n => n.Shot == null), "no screenshot for BIP/KES");
-            Check(tab == PanelTab.Game && gameList.Items.Count == 3 && editList.Items.Count == 3, "game and editing notes in separate lists");
+            Check(tab == PanelTab.Game && gameList.Items.Count == 3 && editList.Items.Count == 2, "game notes and editing rows (bip + cut pair) in separate lists");
             Check(seek.Markers.Count == 3, "timeline shows the game tab's markers");
             ShowTab(PanelTab.Edit);
-            Check(seek.Markers.Count == 3 && editList.Columns.Count == 3, "timeline shows the Kurgu tab's markers");
+            Check(seek.Markers.Count == 3 && seek.Ranges.Count == 2 && editList.Columns.Count == 3, "timeline shows the Kurgu tab's markers, the cut and the bleep range");
+            var cutRow = editList.Items.Cast<ListViewItem>().FirstOrDefault(i => i.SubItems[1].Text == "KES");
+            Check(cutRow != null && cutRow.Text.Contains('–') && cutRow.SubItems[2].Text.StartsWith("2.0 sn"), "cut marks paired into one row: " + cutRow?.Text + " " + cutRow?.SubItems[2].Text);
             await Wait(300);
             CaptureWindow(Path.ChangeExtension(logPath, ".kurgu.png"));
 
@@ -155,6 +163,29 @@ sealed partial class MainForm
             Check(Math.Abs(player.TimeMs - 3000) < 500, "go to selected (-2 s) -> " + player.TimeMs);
             DeleteLast();
             Check(CurrentNotes().Count == 5 && CurrentNotes().All(n => n.Text != "serbest not"), "delete last removed the last added note");
+            Undo();
+            Check(CurrentNotes().Count(n => n.Text == "serbest not") == 1, "undo brings the deleted note back");
+            Undo();
+            Check(CurrentNotes().Count == 5 && CurrentNotes().All(n => n.Text != "serbest not"), "second undo removes the added note again");
+            Redo();
+            Check(CurrentNotes().Count == 6, "redo adds it back");
+            Undo();
+
+            // Status, severity, filter and search on the game list.
+            ShowTab(PanelTab.Game);
+            var bugNote = CurrentNotes().First(n => n.Kind == "BUG");
+            SetStatusOf(bugNote, "DUZELTILDI");
+            SetSeverityOf(bugNote, "KRITIK");
+            filterBox.SelectedIndex = 4;   // open ones
+            RefreshList();
+            Check(gameList.Items.Count == 1 && filterInfo.Text == "1 / 2", "filter 'Açık olanlar' hides the fixed bug: " + filterInfo.Text);
+            filterBox.SelectedIndex = 0;
+            searchBox.Text = "alan";
+            Check(gameList.Items.Count == 1 && ((Note)gameList.Items[0].Tag).Kind == "DEGISIKLIK", "search narrows the list");
+            searchBox.Text = "";
+            var bipNote = CurrentNotes().First(n => n.Kind == "BIP");
+            bipNote.End = bipNote.T + 0.8;
+            store.Save(bipNote.Video);
 
             // Frame step and rate.
             long t0 = player.TimeMs;
@@ -186,11 +217,19 @@ sealed partial class MainForm
             var report = store.WriteReport(out var missing);
             var md = File.ReadAllText(report);
             Check(missing == 0 && md.Contains("### Buglar") && md.Contains("![") && md.IndexOf("### Buglar") < md.IndexOf("### Bip"), "report written, bugs first, screenshots linked");
+            Check(File.Exists(Paths.HtmlReportFile), "HTML report written");
+            Check(Whisper.SelfCheck(), "whisper JSON word parsing");
 
-            // Reload from disk (per-video file wins over the combined file).
+            // Reload from disk (per-video file wins over the combined file); new columns survive.
             var reloaded = new NoteStore();
             reloaded.Load();
             Check(reloaded.All.Count == 5, "reload gives 5 notes");
+            var bugBack = reloaded.All.First(n => n.Kind == "BUG");
+            var bipBack = reloaded.All.First(n => n.Kind == "BIP");
+            Check(bugBack.Status == "DUZELTILDI" && bugBack.Severity == "KRITIK" && bipBack.End is double be && Math.Abs(be - bipBack.T - 0.8) < 0.02,
+                "status, severity and BIP end saved");
+            var lines = File.ReadAllLines(Directory.GetFiles(Paths.NotesDir, "*.txt")[0]);
+            Check(lines.Any(l => l.Split('\t').Length == 6) && lines.Any(l => l.Split('\t').Length == 8), "plain notes keep six columns, extended ones grow");
 
             // Next video in the folder.
             StepVideo(1);
@@ -208,6 +247,10 @@ sealed partial class MainForm
             Check(!split.Panel2Collapsed && tab == PanelTab.Shortcuts && shortcutsPage.Visible && !gamePage.Visible && !editPage.Visible, "help opens panel on shortcuts tab");
             await Wait(300);
             CaptureWindow(Path.ChangeExtension(logPath, ".kisayollar.png"));
+            ShowTab(PanelTab.Videos);
+            await Wait(400);
+            Check(videoList.Items.Count == 2, "Videolar tab lists the folder's videos: " + videoList.Items.Count);
+            CaptureWindow(Path.ChangeExtension(logPath, ".videolar.png"));
             FocusNoteBox();
             Check(tab == PanelTab.Game && gamePage.Visible && noteBox.Focused, "typing switches to the game tab");
             ActiveControl = null;
@@ -220,8 +263,52 @@ sealed partial class MainForm
             StepVideo(-1);
             await Wait(1500);
             player.Pause();
+            gameList.Items[gameList.Items.Count - 1].Selected = true;
             await Wait(500);
             CaptureWindow(Path.ChangeExtension(logPath, ".pencere.png"));
+
+            // Smallest window: the player bar and the side panel must fit without overlapping.
+            var bounds = Bounds;
+            Size = MinimumSize;
+            await Wait(800);
+            Info($"minimum window {Width}x{Height}, client {ClientSize.Width}x{ClientSize.Height}, panel {split.Panel2.Width}, list {gameList.ClientSize.Height}, toolbar {toolbar.Height}, tabs {tabStrip.Height}");
+            var barItems = playerBar.Controls.Cast<Control>().Where(c => c.Visible).OrderBy(c => c.Left).ToList();
+            Check(barItems.Count > 0 && barItems.All(c => c.Left >= 0 && c.Right <= playerBar.Width) && barItems.Zip(barItems.Skip(1)).All(p => p.First.Right <= p.Second.Left),
+                "player bar fits at the minimum size: " + string.Join(" ", barItems.Select(c => c.Left + "-" + c.Right)));
+            Check(split.Panel2.Width >= Px(340) && videoHost.Height > 100 && gameList.ClientSize.Height > Px(30), "side panel and video visible at the minimum size");
+            CaptureWindow(Path.ChangeExtension(logPath, ".kucuk.png"));
+            ShowTab(PanelTab.Edit);
+            await Wait(300);
+            Check(editList.Items.Count == 0 || editList.Items[0].Bounds.Width <= editList.ClientSize.Width, "Kurgu rows fit the narrow list");
+            CaptureWindow(Path.ChangeExtension(logPath, ".kucuk-kurgu.png"));
+            ShowTab(PanelTab.Game);
+            Bounds = bounds;
+            await Wait(600);
+            Check(split.Panel2.Width > Px(340) || Width < Px(1200), "side panel width comes back after the window grows: " + split.Panel2.Width);
+
+            // Dark dialog and context menu.
+            using (var dlg = new EditNoteDialog(CurrentNotes().First(n => n.Kind == "BUG")) { StartPosition = FormStartPosition.Manual })
+            {
+                dlg.Show(this);
+                dlg.Location = new Point(Left + (Width - dlg.Width) / 2, Top + (Height - dlg.Height) / 2);
+                await Wait(500);
+                CaptureHandle(dlg.Handle, Path.ChangeExtension(logPath, ".dialog.png"));
+                dlg.Close();
+            }
+            gameList.Items[0].Selected = true;
+            gameMenu.Show(gameList, new Point(Px(40), Px(10)));
+            await Wait(500);
+            CaptureHandle(gameMenu.Handle, Path.ChangeExtension(logPath, ".menu.png"));
+            gameMenu.Close();
+
+            // A list filled while its page is hidden and has no size yet (a start with notes) shows its rows from the top.
+            ShowTab(PanelTab.Game);
+            editPage.Size = Size.Empty;
+            RefreshList();
+            ShowTab(PanelTab.Edit);
+            await Wait(400);
+            Check(editList.Items.Count > 0 && editList.Items[0].Bounds.Y == 0, "list filled while hidden starts at the top: " + editList.Items.Cast<ListViewItem>().FirstOrDefault()?.Bounds);
+            Check(editList.Items[0].Bounds.Width == editList.ClientSize.Width, $"rows fill the list width: {editList.Items[0].Bounds.Width} / {editList.ClientSize.Width}");
         }
         catch (Exception ex)
         {
@@ -233,11 +320,30 @@ sealed partial class MainForm
         Close();
     }
 
-    void CaptureWindow(string path)
+    void CaptureWindow(string path) => CaptureHandle(Handle, path);
+
+    [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rectangle rect, int size);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out Rectangle rect);
+
+    // The whole window with its title bar, drawn by the window itself (PW_RENDERFULLCONTENT also gets the video), so windows on top
+    // of it do not matter; the visible frame bounds are cut out of the window rectangle.
+    static void CaptureHandle(IntPtr hwnd, string path)
     {
-        var r = RectangleToScreen(ClientRectangle);
-        using var bmp = new Bitmap(r.Width, r.Height);
-        using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(r.Location, Point.Empty, r.Size);
-        bmp.Save(path);
+        GetWindowRect(hwnd, out var w);   // left, top, right, bottom
+        var window = Rectangle.FromLTRB(w.Left, w.Top, w.Width, w.Height);
+        var frame = DwmGetWindowAttribute(hwnd, 9, out var f, 16) == 0 ? Rectangle.FromLTRB(f.Left, f.Top, f.Width, f.Height) : window;
+        using var bmp = new Bitmap(window.Width, window.Height);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            var hdc = g.GetHdc();
+            bool ok = PrintWindow(hwnd, hdc, 2);
+            g.ReleaseHdc(hdc);
+            if (!ok) g.CopyFromScreen(window.Location, Point.Empty, window.Size);
+        }
+        var crop = new Rectangle(frame.X - window.X, frame.Y - window.Y, frame.Width, frame.Height);
+        crop.Intersect(new Rectangle(Point.Empty, bmp.Size));
+        using var cut = bmp.Clone(crop, bmp.PixelFormat);
+        cut.Save(path);
     }
 }

@@ -10,7 +10,36 @@ sealed class Note
     public string Text = "";
     public string Video;      // video file name
     public string Shot;       // screenshot file name in ss\ (old VLC notes: file name prefix), or null
-    public long Order;        // creation order in this session, for "delete last"
+    public string Status;     // game notes: null (open), DUZELTILDI, TEKRAR_TEST
+    public string Severity;   // game notes: null, DUSUK, ORTA, KRITIK
+    public double? End;       // seconds; BIP ranges
+    public string Clip;       // short mp4 clip file name in ss\, or null
+    public long Order;        // creation order in this session
+
+    public Note Clone() => (Note)MemberwiseClone();
+}
+
+static class Statuses
+{
+    public static readonly string[] All = { null, "DUZELTILDI", "TEKRAR_TEST" };
+    public static string Label(string status) => status switch
+    {
+        "DUZELTILDI" => "Düzeltildi",
+        "TEKRAR_TEST" => "Tekrar test",
+        _ => "Açık",
+    };
+}
+
+static class Severities
+{
+    public static readonly string[] All = { null, "DUSUK", "ORTA", "KRITIK" };
+    public static string Label(string severity) => severity switch
+    {
+        "DUSUK" => "Düşük",
+        "ORTA" => "Orta",
+        "KRITIK" => "Kritik",
+        _ => "",
+    };
 }
 
 static class Kinds
@@ -20,6 +49,34 @@ static class Kinds
     // Video editing marks ("Kurgu" tab); everything else belongs to the game test ("Oyun testi" tab).
     public static readonly string[] Edit = { "BIP", "KES_BASLA", "KES_BITIR" };
     public static bool IsEdit(string kind) => Edit.Contains(kind);
+
+    // Pairs cut marks in time order: a start closes at the next end; a start or end without a partner stays alone.
+    public static List<(Note Start, Note End)> Cuts(IEnumerable<Note> notes)
+    {
+        var result = new List<(Note, Note)>();
+        Note open = null;
+        foreach (var n in notes.Where(n => n.Kind is "KES_BASLA" or "KES_BITIR").OrderBy(n => n.T))
+        {
+            if (n.Kind == "KES_BASLA")
+            {
+                if (open != null) result.Add((open, null));
+                open = n;
+            }
+            else
+            {
+                result.Add((open, n));
+                open = null;
+            }
+        }
+        if (open != null) result.Add((open, null));
+        return result;
+    }
+
+    public static List<(double Start, double End)> CutRanges(IEnumerable<Note> notes) =>
+        Cuts(notes).Where(c => c.Start != null && c.End != null && c.End.T > c.Start.T).Select(c => (c.Start.T, c.End.T)).ToList();
+
+    public static List<(double Start, double End)> BeepRanges(IEnumerable<Note> notes, double defaultLength) =>
+        notes.Where(n => n.Kind == "BIP").Select(n => (n.T, n.End is double e && e > n.T ? e : n.T + defaultLength)).ToList();
 
     public static string Label(string kind) => kind switch
     {
@@ -37,7 +94,7 @@ static class Kinds
         "BUG" => "Buglar",
         "DEGISIKLIK" => "Değişiklikler",
         "NOT" => "Notlar",
-        "BIP" => "Bip (küfür)",
+        "BIP" => "Bipler (küfür)",
         "KES_BASLA" => "Kesim başı",
         "KES_BITIR" => "Kesim sonu",
         _ => kind,
@@ -65,13 +122,18 @@ static class Paths
     public static string NotesDir => Path.Combine(WorkDir, "notlar");
     public static string ShotsDir => Path.Combine(WorkDir, "ss");
     public static string ReportFile => Path.Combine(WorkDir, "rapor.md");
+    public static string HtmlReportFile => Path.Combine(WorkDir, "rapor.html");
+    public static string ReviewFile => Path.Combine(WorkDir, "inceleme.json");
+    public static string ExportDir => Path.Combine(WorkDir, "cikti");
 }
 
 // Notes live in one file per video (Video Notlari\notlar\<video>.txt); Desktop\video_notlari.txt is kept as the
-// combined file in the old VLC extension format: seconds <TAB> time <TAB> type <TAB> note <TAB> video <TAB> screenshot.
+// combined file in the old VLC extension format: seconds <TAB> time <TAB> type <TAB> note <TAB> video <TAB> screenshot,
+// extended with status <TAB> severity <TAB> end seconds <TAB> clip. Trailing empty columns are not written, so plain notes
+// keep the old six-column lines. The IINA plugin (iina\) reads and writes the same files.
 sealed class NoteStore
 {
-    const string Header = "# saniye\tzaman\ttur\tnot\tvideo\tss";
+    const string Header = "# saniye\tzaman\ttur\tnot\tvideo\tss\tdurum\tonem\tbitis\tklip";
     static readonly UTF8Encoding Utf8 = new(false);
 
     public readonly List<Note> All = new();
@@ -105,13 +167,18 @@ sealed class NoteStore
             var f = line.Split('\t');
             // Old files have five columns (no screenshot); new ones six.
             if (f.Length < 5 || !double.TryParse(f[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var t)) continue;
+            string Col(int i) => f.Length > i && f[i].Length > 0 ? f[i] : null;
             result.Add(new Note
             {
                 T = t,
                 Kind = f[2],
                 Text = f[3],
                 Video = f[4],
-                Shot = f.Length > 5 && f[5].Length > 0 ? f[5] : null,
+                Shot = Col(5),
+                Status = Col(6),
+                Severity = Col(7),
+                End = double.TryParse(Col(8), NumberStyles.Float, CultureInfo.InvariantCulture, out var end) ? end : null,
+                Clip = Col(9),
             });
         }
         return result;
@@ -151,8 +218,16 @@ sealed class NoteStore
         return c != 0 ? c : a.T.CompareTo(b.T);
     });
 
-    static string Line(Note n) => string.Format(CultureInfo.InvariantCulture, "{0:0.00}\t{1}\t{2}\t{3}\t{4}\t{5}",
-        n.T, Fmt(n.T), n.Kind, Clean(n.Text), n.Video, n.Shot ?? "");
+    static string Line(Note n)
+    {
+        var cols = new List<string>
+        {
+            n.T.ToString("0.00", CultureInfo.InvariantCulture), Fmt(n.T), n.Kind, Clean(n.Text), n.Video, n.Shot ?? "",
+            n.Status ?? "", n.Severity ?? "", n.End?.ToString("0.00", CultureInfo.InvariantCulture) ?? "", n.Clip ?? "",
+        };
+        while (cols.Count > 6 && cols[^1].Length == 0) cols.RemoveAt(cols.Count - 1);
+        return string.Join('\t', cols);
+    }
 
     void SaveVideo(string video)
     {
@@ -199,6 +274,16 @@ sealed class NoteStore
         Save(n.Video);
     }
 
+    // Copies of one video's notes, for undo / redo.
+    public List<Note> Snapshot(string video) => All.Where(n => n.Video == video).Select(n => n.Clone()).ToList();
+
+    public void Restore(string video, List<Note> notes)
+    {
+        All.RemoveAll(n => n.Video == video);
+        All.AddRange(notes.Select(n => n.Clone()));
+        Save(video);
+    }
+
     // Finds the screenshot file of a note; old VLC notes only stored a prefix of the file name.
     public static string ResolveShot(string shot)
     {
@@ -207,42 +292,12 @@ sealed class NoteStore
         return Directory.GetFiles(Paths.ShotsDir, shot + "*").Select(Path.GetFileName).OrderBy(x => x).FirstOrDefault();
     }
 
-    // Markdown report grouped by video and type (bugs and changes first), screenshots linked relative to the report.
+    // Writes rapor.md and rapor.html for all notes; returns the Markdown path.
     public string WriteReport(out int missing)
     {
-        missing = 0;
         Directory.CreateDirectory(Paths.WorkDir);
-        var sb = new StringBuilder();
-        sb.Append("# Video notları — bug fixing raporu\n\n");
-        sb.Append("Oluşturuldu: ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append("\n\n");
-        foreach (var video in All.Select(n => n.Video).Distinct().OrderBy(v => v, StringComparer.Ordinal))
-        {
-            var notes = All.Where(n => n.Video == video).ToList();
-            sb.Append("## ").Append(video).Append("\n\n");
-            sb.Append(string.Format("{0} bug, {1} değişiklik, {2} not\n\n",
-                notes.Count(n => n.Kind == "BUG"), notes.Count(n => n.Kind == "DEGISIKLIK"), notes.Count(n => n.Kind == "NOT")));
-            foreach (var kind in Kinds.All.Concat(notes.Select(n => n.Kind).Where(k => !Kinds.All.Contains(k)).Distinct()))
-            {
-                var ofKind = notes.Where(n => n.Kind == kind).OrderBy(n => n.T).ToList();
-                if (ofKind.Count == 0) continue;
-                sb.Append("### ").Append(Kinds.ReportTitle(kind)).Append("\n\n");
-                foreach (var n in ofKind)
-                {
-                    sb.Append("- **").Append(Fmt(n.T)).Append("** — ").Append(n.Text.Length > 0 ? n.Text : "(açıklama yok)").Append('\n');
-                    if (n.Shot == null) continue;
-                    var file = ResolveShot(n.Shot);
-                    if (file != null)
-                        sb.Append("\n  ![").Append(Fmt(n.T)).Append("](ss/").Append(Uri.EscapeDataString(file)).Append(")\n\n");
-                    else
-                    {
-                        missing++;
-                        sb.Append("  - (SS bulunamadı: ").Append(n.Shot).Append(")\n");
-                    }
-                }
-                sb.Append('\n');
-            }
-        }
-        File.WriteAllText(Paths.ReportFile, sb.ToString(), Utf8);
+        File.WriteAllText(Paths.ReportFile, Reports.Markdown(All, out missing), Utf8);
+        File.WriteAllText(Paths.HtmlReportFile, Reports.Html(All), Utf8);
         return Paths.ReportFile;
     }
 }

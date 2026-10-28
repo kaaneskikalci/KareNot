@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KareNot</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1d1d1f;
+    --muted: #6e6e73;
+    --line: rgba(0, 0, 0, 0.12);
+    --row: rgba(0, 0, 0, 0.04);
+    --sel: rgba(40, 120, 230, 0.18);
+    --field: rgba(255, 255, 255, 0.85);
+    --btn: rgba(0, 0, 0, 0.07);
+    --warn: #b35c00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #f2f2f7;
+      --muted: #a1a1a6;
+      --line: rgba(255, 255, 255, 0.14);
+      --row: rgba(255, 255, 255, 0.05);
+      --sel: rgba(40, 120, 230, 0.35);
+      --field: rgba(0, 0, 0, 0.35);
+      --btn: rgba(255, 255, 255, 0.10);
+      --warn: #ffb04d;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: transparent; color: var(--fg);
+    font: 12px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  body { padding: 8px 10px 16px; }
+  button, select, input { font: inherit; color: inherit; }
+  button { background: var(--btn); border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; cursor: pointer; }
+  button:hover { filter: brightness(1.15); }
+  button.on { outline: 2px solid #FF2020; }
+  .muted { color: var(--muted); }
+  #video { font-weight: 600; word-break: break-all; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  .bar .grow { flex: 1; }
+  #tabs { display: flex; border-bottom: 1px solid var(--line); margin: 8px 0; }
+  #tabs button { flex: 1; border: none; border-radius: 0; background: transparent; padding: 6px 2px;
+    border-bottom: 2px solid transparent; }
+  #tabs button.active { border-bottom-color: #2878E6; font-weight: 600; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  #draft { width: 100%; padding: 6px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--field); }
+  .kinds { display: flex; gap: 6px; margin: 6px 0; }
+  .kinds button { flex: 1; color: #fff; border: none; font-weight: 600; padding: 7px 4px; }
+  .kinds .k { opacity: 0.8; font-weight: 400; font-size: 11px; }
+  .list { margin-top: 8px; border-top: 1px solid var(--line); }
+  .empty { padding: 10px 2px; }
+  .row { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row:hover { background: var(--row); }
+  .row.sel { background: var(--sel); }
+  .head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .time { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .badge { color: #fff; border-radius: 3px; padding: 0 5px; font-size: 11px; font-weight: 600; }
+  .tag { border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  .tag.KRITIK { border-color: #DC2828; color: #DC2828; }
+  .tag.DUZELTILDI { border-color: #1EA046; color: #1EA046; }
+  .warn { color: var(--warn); font-size: 11px; }
+  .text { margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+  .tools { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .tools select { background: var(--field); border: 1px solid var(--line); border-radius: 4px; padding: 2px; }
+  .tools button { padding: 2px 7px; }
+  .edit-input { width: 100%; margin-top: 4px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); }
+  table.keys { width: 100%; border-collapse: collapse; }
+  table.keys th { text-align: left; padding: 10px 0 4px; font-size: 11px; color: var(--muted); }
+  table.keys td { padding: 3px 6px 3px 0; vertical-align: top; }
+  table.keys td.key { white-space: nowrap; font-weight: 600; color: #2878E6; }
+</style>
+</head>
+<body>
+  <div id="video" class="muted">Video açık değil</div>
+  <div class="bar">
+    <span id="reviewed" class="muted grow"></span>
+    <button id="btn-reviewed" title="Şu anki konumu incelenen nokta olarak kaydeder">İnceledim [I]</button>
+  </div>
+  <div class="bar">
+    <button id="btn-report">Raporu kaydet</button>
+    <button id="btn-folder">Klasör</button>
+    <button id="btn-loop">Döngü [L]</button>
+  </div>
+
+  <div id="tabs">
+    <button data-tab="game" class="active">Oyun testi</button>
+    <button data-tab="edit">Kurgu</button>
+    <button data-tab="keys">Kısayollar</button>
+  </div>
+
+  <div id="panel-game" class="panel active">
+    <input id="draft" type="text" placeholder="Notu yaz… (Enter = NOT)" autocomplete="off" spellcheck="true">
+    <div class="bar">
+      <label><input id="ss" type="checkbox" checked> SS ekle</label>
+      <span class="grow"></span>
+      <button id="btn-area" title="Videoda bir alanı kırmızı çerçeveyle işaretle; sonraki notun SS'ine çizilir">Alan seç</button>
+    </div>
+    <div class="kinds">
+      <button data-kind="BUG" style="background:#DC2828">BUG <span class="k">[B]</span></button>
+      <button data-kind="DEGISIKLIK" style="background:#E68200">DEĞİŞİKLİK <span class="k">[D]</span></button>
+      <button data-kind="NOT" style="background:#2878E6">NOT <span class="k">[N]</span></button>
+    </div>
+    <div id="list-game" class="list"></div>
+  </div>
+
+  <div id="panel-edit" class="panel">
+    <div class="kinds">
+      <button data-kind="BIP" style="background:#A03CC8">BİP <span class="k">[K]</span></button>
+      <button data-kind="KES_BASLA" style="background:#1EA046">Kesim BAŞLA <span class="k">[1]</span></button>
+      <button data-kind="KES_BITIR" style="background:#146E32">Kesim BİTİR <span class="k">[2]</span></button>
+    </div>
+    <div id="list-edit" class="list"></div>
+  </div>
+
+  <div id="panel-keys" class="panel">
+    <table class="keys" id="keys"></table>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>

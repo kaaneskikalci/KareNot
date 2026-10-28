@@ -51,16 +51,10 @@ sealed class FrameOverlay : Control
         e.Graphics.DrawImage(Frame, ImageRect);
         if (Selection.Width > 0 && Selection.Height > 0)
         {
-            using var pen = new Pen(Color.Red, 3);
+            using var pen = new Pen(Color.Red, 3f * DeviceDpi / 96f);
             var s = ImageToClient(Selection);
             e.Graphics.DrawRectangle(pen, s.X, s.Y, s.Width, s.Height);
         }
-        using var font = new Font("Segoe UI", 10f, FontStyle.Bold);
-        const string hint = "Alan seçili — notu yaz, türünü seç (Esc: iptal, Boşluk: devam)";
-        var size = e.Graphics.MeasureString(hint, font);
-        using var back = new SolidBrush(Color.FromArgb(170, 0, 0, 0));
-        e.Graphics.FillRectangle(back, 8, 8, size.Width + 12, size.Height + 6);
-        e.Graphics.DrawString(hint, font, Brushes.White, 14, 11);
     }
 
     // The frame with the selection drawn on it, as saved for the note.
