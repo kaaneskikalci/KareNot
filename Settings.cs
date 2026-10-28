@@ -38,7 +38,7 @@ sealed class AppSettings
     }
 }
 
-// Per-video review progress and session info in Video Notlari\inceleme.json, shared with the IINA plugin:
+// Per-video review progress and session info in KareNot\inceleme.json (one file for all videos), shared with the IINA plugin:
 // { "<video>": { "pos": s, "reviewed": s, "done": bool, "build": "", "tester": "" } }. Unknown keys are kept.
 static class ReviewStore
 {
@@ -93,7 +93,7 @@ static class ReviewStore
     {
         try
         {
-            Directory.CreateDirectory(Paths.WorkDir);
+            Directory.CreateDirectory(Paths.Root);
             var tmp = Paths.ReviewFile + ".tmp";
             File.WriteAllText(tmp, Root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
             File.Move(tmp, Paths.ReviewFile, true);
@@ -109,11 +109,11 @@ static class ReviewStore
     }
 }
 
-// User-editable text lists in the data folder: note templates and the words that make a BIP candidate.
+// User-editable text lists in the KareNot root: note templates and the words that make a BIP candidate.
 static class TextLists
 {
-    public static string TemplatesFile => Path.Combine(Paths.WorkDir, "hazir_notlar.txt");
-    public static string ProfanityFile => Path.Combine(Paths.WorkDir, "kufur_listesi.txt");
+    public static string TemplatesFile => Path.Combine(Paths.Root, "hazir_notlar.txt");
+    public static string ProfanityFile => Path.Combine(Paths.Root, "kufur_listesi.txt");
 
     const string TemplatesDefault =
         "# Hazır not metinleri: her satır bir metin. # ile başlayan satırlar yok sayılır.\n" +

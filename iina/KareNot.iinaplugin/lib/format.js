@@ -121,9 +121,80 @@ function parseNum(s) {
   return isFinite(v) ? v : null;
 }
 
-// Windows' Path.GetInvalidFileNameChars(), so both apps use the same per-video file name.
+// Windows' Path.GetInvalidFileNameChars(), so both apps use the same per-video file and folder names.
 function safeFileName(video) {
   return String(video).replace(/["<>|\u0000-\u001f:*?\\/]/g, "_");
+}
+
+// Folder of a video under KareNot/ (Paths.FolderName in Notes.cs): the file name without its extension (everything
+// before the last '.'), invalid Windows file name characters replaced by '_', trailing dots and spaces removed (Windows
+// drops them), "video" if nothing is left. Videos with the same base name share it; compare with sameFolderName.
+function videoFolderName(video) {
+  const name = safeFileName(video == null ? "" : video);
+  const dot = name.lastIndexOf(".");
+  const base = (dot < 0 ? name : name.slice(0, dot)).replace(/[. ]+$/, "");
+  return base.length > 0 ? base : "video";
+}
+
+// Folder names are compared ignoring case (Windows and default macOS volumes do).
+function sameFolderName(a, b) {
+  return String(a).normalize("NFC").toUpperCase() === String(b).normalize("NFC").toUpperCase();
+}
+
+// Same note: same video, kind, text and seconds as written in the file (two decimals).
+function noteKey(n) {
+  return n.video + "\t" + num2(n.t) + "\t" + n.kind + "\t" + clean(n.text);
+}
+
+// Appends the notes of `incoming` that are not in `existing` yet (and drops duplicates within `incoming`).
+// Returns { list, added }; list is a new array, sorted like the files.
+function mergeNotes(existing, incoming) {
+  const list = existing.slice();
+  const seen = {};
+  for (const n of list) seen[noteKey(n)] = true;
+  let added = 0;
+  for (const n of incoming) {
+    const k = noteKey(n);
+    if (seen[k]) continue;
+    seen[k] = true;
+    list.push(n);
+    added++;
+  }
+  sortNotes(list);
+  return { list: list, added: added };
+}
+
+// Merges an old inceleme.json root into the current one: videos only in the old root are taken over; for videos in
+// both, the current values win and only missing fields are filled in from the old entry. Returns { root, changed }.
+function mergeReview(current, old) {
+  const root = {};
+  Object.keys(current || {}).forEach((k) => { root[k] = current[k]; });
+  let changed = false;
+  Object.keys(old || {}).forEach((video) => {
+    const o = old[video];
+    const c = root[video];
+    if (!Object.prototype.hasOwnProperty.call(root, video)) {
+      root[video] = o;
+      changed = true;
+    } else if (c && typeof c === "object" && !Array.isArray(c) && o && typeof o === "object" && !Array.isArray(o)) {
+      const missing = Object.keys(o).filter((f) => !Object.prototype.hasOwnProperty.call(c, f));
+      if (missing.length === 0) return;
+      const e = Object.assign({}, c);
+      missing.forEach((f) => { e[f] = o[f]; });
+      root[video] = e;
+      changed = true;
+    }
+  });
+  return { root: root, changed: changed };
+}
+
+// Screenshot lookup among the file names of an ss/ folder: the exact name, else (old VLC notes store a prefix) the
+// first name in ordinal order that starts with it. Returns the file name or null.
+function findShot(shot, names) {
+  if (!shot) return null;
+  if (names.indexOf(shot) >= 0) return shot;
+  const hits = names.filter((n) => n.indexOf(shot) === 0).sort(ordinal);
+  return hits.length ? hits[0] : null;
 }
 
 function splitLines(content) {
@@ -217,7 +288,7 @@ function tags(n) {
 }
 
 // Markdown report grouped by video, then kind (bugs and changes first); screenshots linked relative to rapor.md.
-// resolveShot(shot) returns the file name in ss/ or null. Returns { text, missing }.
+// resolveShot(shot, note) returns the file name in the ss/ folder next to rapor.md or null. Returns { text, missing }.
 function buildReport(all, resolveShot, now) {
   let missing = 0;
   const d = now || new Date();
@@ -243,7 +314,7 @@ function buildReport(all, resolveShot, now) {
         sb += "- **" + fmt(n.t) + "** — " + (n.text.length > 0 ? n.text : "(açıklama yok)") +
           (tagText.length ? " " + tagText.join(" ") : "") + "\n";
         if (!n.shot) continue;
-        const f = resolveShot(n.shot);
+        const f = resolveShot(n.shot, n);
         if (f) {
           sb += "\n  ![" + fmt(n.t) + "](ss/" + escapeDataString(f) + ")\n\n";
         } else {
@@ -279,5 +350,6 @@ function parseReview(text) {
 module.exports = {
   HEADER, GAME_KINDS, EDIT_KINDS, ALL_KINDS, STATUSES, STATUS_LABELS, SEVERITIES, SEVERITY_LABELS,
   isEdit, isGame, label, color, reportTitle, pad, fmt, fmtShort, num2, clean, parseNum, safeFileName,
+  videoFolderName, sameFolderName, noteKey, mergeNotes, mergeReview, findShot,
   parseNotes, noteLine, serialize, sortNotes, cuts, escapeDataString, buildReport, shotName, parseReview,
 };

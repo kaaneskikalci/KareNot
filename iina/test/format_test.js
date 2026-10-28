@@ -79,6 +79,62 @@ test("safe file names match Windows invalid chars", () => {
   assert.strictEqual(F.safeFileName("Oyun Testi ğüşİ.mkv"), "Oyun Testi ğüşİ.mkv");
 });
 
+test("video folder name: base name without extension, Windows-safe", () => {
+  assert.strictEqual(F.videoFolderName("Oyun Testi 1.mp4"), "Oyun Testi 1");
+  assert.strictEqual(F.videoFolderName("Oyun Testi 1.mkv"), "Oyun Testi 1");   // same folder as the .mp4
+  assert.strictEqual(F.videoFolderName("kayıt.2026-10-28 ğüşİ.mkv"), "kayıt.2026-10-28 ğüşİ");
+  assert.strictEqual(F.videoFolderName("uzantısız"), "uzantısız");
+  assert.strictEqual(F.videoFolderName('a:b*c?d"e<f>g|h\\j\u0001.mp4'), "a_b_c_d_e_f_g_h_j_");
+  assert.strictEqual(F.videoFolderName("a/b.c.mp4"), "a_b.c");
+  assert.strictEqual(F.videoFolderName("son nokta."), "son nokta");
+  assert.strictEqual(F.videoFolderName("a. .mp4"), "a");                       // Windows drops trailing dots/spaces
+  assert.strictEqual(F.videoFolderName(".mp4"), "video");
+  assert.strictEqual(F.videoFolderName(""), "video");
+  assert.ok(F.sameFolderName("Test 1", "TEST 1"));
+  assert.ok(F.sameFolderName("Kayıtİ", "kayıtİ"));
+  assert.ok(F.sameFolderName("ç", "ç"));                            // NFD vs NFC
+  assert.ok(!F.sameFolderName("Test 1", "Test 2"));
+});
+
+test("mergeNotes adds only missing notes", () => {
+  const parse = (lines) => F.parseNotes(F.HEADER + "\n" + lines.join("\n") + "\n");
+  const existing = parse(["65.40\t00:01:05.4\tBUG\tDuvar\tv.mp4\tbug_a.png", "5.00\t00:00:05.0\tNOT\tx\tv.mkv"]);
+  const incoming = parse([
+    "65.4\t00:01:05.4\tBUG\tDuvar\tv.mp4",            // same note (old 5-column line, other number spelling)
+    "70.00\t00:01:10.0\tNOT\tyeni\tv.mp4",
+    "70.00\t00:01:10.0\tNOT\tyeni\tv.mp4",            // duplicate inside the old data
+    "65.40\t00:01:05.4\tBUG\tDuvar\tv.mkv",           // other video, same base name
+  ]);
+  const m = F.mergeNotes(existing, incoming);
+  assert.strictEqual(m.added, 2);
+  assert.strictEqual(existing.length, 2);           // input not changed
+  assert.strictEqual(F.serialize(m.list), F.HEADER + "\n" +
+    "5.00\t00:00:05.0\tNOT\tx\tv.mkv\t\n" +
+    "65.40\t00:01:05.4\tBUG\tDuvar\tv.mkv\t\n" +
+    "65.40\t00:01:05.4\tBUG\tDuvar\tv.mp4\tbug_a.png\n" +
+    "70.00\t00:01:10.0\tNOT\tyeni\tv.mp4\t\n");
+  assert.strictEqual(F.mergeNotes(m.list, incoming).added, 0);   // repeatable
+});
+
+test("mergeReview: current wins, old fills gaps", () => {
+  const current = { "a.mp4": { pos: 50 }, "b.mp4": { reviewed: 3, pos: 4 } };
+  const old = { "a.mp4": { pos: 10, reviewed: 8 }, "b.mp4": { pos: 1 }, "c.mp4": { done: true } };
+  const m = F.mergeReview(current, old);
+  assert.strictEqual(m.changed, true);
+  assert.deepStrictEqual(m.root, { "a.mp4": { pos: 50, reviewed: 8 }, "b.mp4": { reviewed: 3, pos: 4 }, "c.mp4": { done: true } });
+  assert.deepStrictEqual(current["a.mp4"], { pos: 50 });   // input not changed
+  assert.strictEqual(F.mergeReview(m.root, old).changed, false);
+  assert.deepStrictEqual(F.mergeReview({}, {}), { root: {}, changed: false });
+});
+
+test("findShot: exact name, else first prefix match", () => {
+  const names = ["bug_20261028_1.png", "bug_20261028_0.png", "not_x.png"];
+  assert.strictEqual(F.findShot("not_x.png", names), "not_x.png");
+  assert.strictEqual(F.findShot("bug_20261028", names), "bug_20261028_0.png");
+  assert.strictEqual(F.findShot("yok", names), null);
+  assert.strictEqual(F.findShot(null, names), null);
+});
+
 test("cuts pair start with next end", () => {
   const n = (t, kind) => ({ t: t, kind: kind });
   const r = F.cuts([n(30, "KES_BITIR"), n(10, "KES_BASLA"), n(20, "KES_BASLA"), n(25, "KES_BITIR"), n(40, "KES_BASLA")]);

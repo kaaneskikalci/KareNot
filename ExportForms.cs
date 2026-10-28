@@ -159,7 +159,7 @@ sealed class PackageDialog : DarkDialog
         AddRow(openOnly);
         AddRow(media);
         AddRow(Lbl("İçerik: rapor.md, rapor.html, notlar.csv, agent_gorevleri.md, kurgu notları (JSON + md) ve ss\\ dosyaları.\n" +
-            "Kayıt yeri: Video Notlari\\cikti", Theme.Faint));
+            "Kayıt yeri: bu video için KareNot\\<video>\\cikti, tüm videolar için KareNot\\cikti", Theme.Faint));
         AddButton("Paketi oluştur", DialogResult.OK);
     }
 }

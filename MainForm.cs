@@ -15,6 +15,7 @@ sealed partial class MainForm : Form
     readonly NoteStore store = new();
     readonly UndoHistory history = new();
     readonly string startVideo;
+    readonly (string Message, bool Failed) migration;   // moving the data of the layout before v1.3 (Notes.cs)
     VlcPlayer player;
     readonly System.Windows.Forms.Timer uiTimer = new() { Interval = 100 };
     readonly ToolTip tips = Theme.Tooltip();
@@ -126,6 +127,8 @@ sealed partial class MainForm : Form
         tabStrip = new TabStrip(tips) { Height = 44 };
 
         Ffmpeg.PathOverride = settings.FfmpegPath;
+        migration = Migration.Run();
+        ReviewStore.Reload();
         BuildLayout();
         store.Load();
         RegisterReview();
@@ -163,7 +166,8 @@ sealed partial class MainForm : Form
         var name = new Label { Text = "KareNot", AutoSize = true, Font = Theme.Semi(12.5f), ForeColor = Theme.Text, Margin = Padding.Empty };
         var separator = new Pane { Size = new Size(1, 24), BackColor = Theme.Border, Margin = new Padding(14, 0, 14, 0) };
         var openButton = Btn("Video aç", OpenDialog, "Video aç (Ctrl+O) — videoyu pencereye sürükleyip bırakmak da olur", Theme.Glyph.OpenFolder);
-        var reportButton = Btn("Raporu kaydet", SaveReport, "Raporu kaydet (Ctrl+S): Masaüstü\\Video Notlari\\rapor.md ve rapor.html", Theme.Glyph.Report);
+        var reportButton = Btn("Raporu kaydet", SaveReport, "Raporu kaydet (Ctrl+S): rapor.md ve rapor.html açık videonun klasörüne\n" +
+            "(Masaüstü\\KareNot\\<video>); video açık değilse tüm videoların raporu Masaüstü\\KareNot'a", Theme.Glyph.Report);
         reportButton.Primary = true;
         openButton.BaseHeight = reportButton.BaseHeight = 36;
         openButton.Padding = reportButton.Padding = new Padding(14, 0, 14, 0);
@@ -355,7 +359,7 @@ sealed partial class MainForm : Form
         exportButton.Click += (s, e) => exportMenu.Show(exportButton, new Point(0, exportButton.Height));
         var toolsButton = Btn("Araçlar", null, "Ayarlar, hazır metinler ve küfür listesi, kesilmiş hâli izle, küfür adayları, ölü anlar", Theme.Glyph.Tools);
         toolsButton.Click += (s, e) => toolsMenu.Show(toolsButton, new Point(0, toolsButton.Height));
-        var folderButton = Btn("Klasörü aç", OpenFolder, "Not klasörünü aç (Masaüstü\\Video Notlari)", Theme.Glyph.Folder);
+        var folderButton = Btn("Klasörü aç", OpenFolder, "Açık videonun klasörünü aç (Masaüstü\\KareNot\\<video>); video yoksa Masaüstü\\KareNot", Theme.Glyph.Folder);
         foreach (var b in new[] { exportButton, toolsButton, folderButton })
         {
             b.Quiet = true;
@@ -366,7 +370,7 @@ sealed partial class MainForm : Form
         var footerRow = new SplitRow(32) { Elastic = saveIndicator, ElasticMin = () => saveIndicator.MinWidth, Gap = 2 }
             .L(saveIndicator).R(exportButton, toolsButton, folderButton);
         footerRow.Compactable.AddRange(new[] { folderButton, toolsButton, exportButton });
-        tips.SetToolTip(saveIndicator, "Notlar her değişiklikte kaydedilir: " + Paths.NotesDir);
+        tips.SetToolTip(saveIndicator, "Notlar her değişiklikte kaydedilir: " + Path.Combine(Paths.Root, "<video>", "notlar.txt"));
         footer = new Column { AutoSize = true, Padding = new Padding(12, 6, 10, 4) };
         Stack(footer, null, new Control[] { status, footerRow });
         foreach (var page in new Control[] { gamePage, editPage, videosPage, shortcutsPage }) split.Panel2.Controls.Add(page);
@@ -592,6 +596,8 @@ sealed partial class MainForm : Form
         uiTimer.Tick += (s, ev) => UpdatePlayerUi();
         uiTimer.Start();
         RefreshList();
+        if (migration.Message != null) SetStatus(migration.Message);
+        if (migration.Failed) MessageBox.Show(this, migration.Message, "KareNot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         if (startVideo != null && File.Exists(startVideo)) OpenVideo(startVideo);
         base.OnShown(e);
     }
@@ -885,7 +891,7 @@ sealed partial class MainForm : Form
         {
             save();
             saveIndicator.Set(true, "Notlar kaydedildi", "Kaydedildi");
-            tips.SetToolTip(saveIndicator, $"Son kayıt {DateTime.Now:HH:mm:ss}: {Paths.NotesDir}");
+            tips.SetToolTip(saveIndicator, $"Son kayıt {DateTime.Now:HH:mm:ss}: {(currentVideo != null ? Paths.NotesFile(currentVideo) : Paths.Root)}");
             return true;
         }
         catch (Exception ex)
@@ -901,10 +907,10 @@ sealed partial class MainForm : Form
     string MakeShot(string kind, double t, out string error)
     {
         error = null;
-        Directory.CreateDirectory(Paths.ShotsDir);
+        Directory.CreateDirectory(Paths.ShotsDir(currentVideo));
         var name = string.Format(CultureInfo.InvariantCulture, "{0}_{1:yyyyMMdd_HHmmss}_{2}s_{3:00}.png",
             kind.ToLowerInvariant(), DateTime.Now, (int)t, ++shotCounter);
-        var path = Path.Combine(Paths.ShotsDir, name);
+        var path = Path.Combine(Paths.ShotsDir(currentVideo), name);
         if (RegionActive)
         {
             using var marked = overlay.RenderMarked();
@@ -1088,13 +1094,13 @@ sealed partial class MainForm : Form
     void OpenSelectedShot()
     {
         var n = SelectedNote;
-        var file = n == null ? null : NoteStore.ResolveShot(n.Shot);
+        var file = n == null ? null : NoteStore.ResolveShot(n);
         if (file == null)
         {
             SetStatus("Seçili notun SS'i yok.");
             return;
         }
-        Process.Start(new ProcessStartInfo(Path.Combine(Paths.ShotsDir, file)) { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo(Path.Combine(Paths.ShotsDir(n.Video), file)) { UseShellExecute = true });
     }
 
     void DeleteSelected()
@@ -1179,7 +1185,7 @@ sealed partial class MainForm : Form
         RefreshTemplates();
 
         if (currentVideo == null)
-            SetStatus($"Toplam {store.All.Count} not. Not dosyası: {Paths.CombinedFile}");
+            SetStatus($"Toplam {store.All.Count} not. Not dosyaları: {Path.Combine(Paths.Root, "<video>", "notlar.txt")}");
         else
             SetStatus($"{notes.Count(n => !Kinds.IsEdit(n.Kind))} not ({Count("BUG")} bug, {Count("DEGISIKLIK")} değişiklik) · " +
                 $"kurgu: {Count("BIP")} bip, {Count("KES_BASLA")} kesim — bu video");
@@ -1431,11 +1437,15 @@ sealed partial class MainForm : Form
         fittingPanel = false;
     }
 
-    void SaveReport()
+    void SaveReport() => SaveReportOf(currentVideo);
+
+    // The open video's report in its folder; all videos (video null) in the KareNot root.
+    void SaveReportOf(string video)
     {
+        if (video == null && store.All.Count == 0) { SetStatus("Rapora girecek not yok."); return; }
         try
         {
-            var path = store.WriteReport(out var missing);
+            var path = store.WriteReport(video, out var missing);
             SetStatus("Rapor kaydedildi: " + path + (missing > 0 ? $" ({missing} SS bulunamadı)" : ""));
         }
         catch (Exception ex)
@@ -1446,8 +1456,9 @@ sealed partial class MainForm : Form
 
     void OpenFolder()
     {
-        Directory.CreateDirectory(Paths.WorkDir);
-        Process.Start(new ProcessStartInfo(Paths.WorkDir) { UseShellExecute = true });
+        var dir = Paths.Dir(currentVideo);
+        Directory.CreateDirectory(dir);
+        Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
     }
 
     void SetStatus(string text)
@@ -1524,7 +1535,7 @@ sealed partial class MainForm : Form
         }),
         ("RAPOR", new[]
         {
-            ("Ctrl+S", "Raporu kaydet (Masaüstü\\Video Notlari\\rapor.md ve rapor.html)"),
+            ("Ctrl+S", "Raporu kaydet (rapor.md ve rapor.html, Masaüstü\\KareNot\\<video>\\; video yoksa tüm videolar)"),
             ("Ctrl+P", "Bulgu paketi (ZIP): rapor, görev listesi, SS'ler ve klipler"),
             ("Dışa aktar ▾", "CSV, görev listesi, kurgu notları (JSON), DaVinci Resolve işaretleri, bipli/kesilmiş video"),
             ("Araçlar ▾", "Ayarlar, küfür adayları, ölü anlar, listeleri düzenle"),

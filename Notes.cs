@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace KareNot;
 
@@ -117,20 +119,39 @@ static class Paths
     // VIDEONOTLARI_DATA overrides the Desktop folder (used by the self test).
     public static string Desktop =>
         Environment.GetEnvironmentVariable("VIDEONOTLARI_DATA") is { Length: > 0 } d ? d : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-    public static string CombinedFile => Path.Combine(Desktop, "video_notlari.txt");
-    public static string WorkDir => Path.Combine(Desktop, "Video Notlari");
-    public static string NotesDir => Path.Combine(WorkDir, "notlar");
-    public static string ShotsDir => Path.Combine(WorkDir, "ss");
-    public static string ReportFile => Path.Combine(WorkDir, "rapor.md");
-    public static string HtmlReportFile => Path.Combine(WorkDir, "rapor.html");
-    public static string ReviewFile => Path.Combine(WorkDir, "inceleme.json");
-    public static string ExportDir => Path.Combine(WorkDir, "cikti");
+    // Desktop\KareNot\ holds the shared files and one folder per video, named after the video file without its extension.
+    public static string Root => Path.Combine(Desktop, "KareNot");
+    public static string ReviewFile => Path.Combine(Root, "inceleme.json");
+
+    public static string FolderName(string video)
+    {
+        var name = Path.GetFileNameWithoutExtension(video ?? "");
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        name = name.TrimEnd('.', ' ');
+        return name.Length > 0 ? name : "video";
+    }
+
+    // Videos with the same name but another extension share a folder (and its notlar.txt).
+    public static bool SameFolder(string a, string b) => string.Equals(FolderName(a), FolderName(b), StringComparison.OrdinalIgnoreCase);
+    public static string VideoDir(string video) => Path.Combine(Root, FolderName(video));
+    public static string NotesFile(string video) => Path.Combine(VideoDir(video), "notlar.txt");
+    public static string ShotsDir(string video) => Path.Combine(VideoDir(video), "ss");
+    // Reports and exports of one video go to its folder; with video null (all videos) to the root.
+    public static string Dir(string video) => video == null ? Root : VideoDir(video);
+    public static string ReportFile(string video) => Path.Combine(Dir(video), "rapor.md");
+    public static string HtmlReportFile(string video) => Path.Combine(Dir(video), "rapor.html");
+    public static string ExportDir(string video) => Path.Combine(Dir(video), "cikti");
+
+    // Layout before v1.3, moved by Migration: Desktop\Video Notlari\notlar\<video>.txt and one shared ss\; combined files of all
+    // notes on the Desktop (old VLC extension) and in the folder (a v1.3 preview).
+    public static string OldDir => Path.Combine(Desktop, "Video Notlari");
+    public static string[] OldCombinedFiles => new[] { Path.Combine(Desktop, "video_notlari.txt"), Path.Combine(OldDir, "video_notlari.txt") };
 }
 
-// Notes live in one file per video (Video Notlari\notlar\<video>.txt); Desktop\video_notlari.txt is kept as the
-// combined file in the old VLC extension format: seconds <TAB> time <TAB> type <TAB> note <TAB> video <TAB> screenshot,
-// extended with status <TAB> severity <TAB> end seconds <TAB> clip. Trailing empty columns are not written, so plain notes
-// keep the old six-column lines. The IINA plugin (iina\) reads and writes the same files.
+// Notes live in the video's folder (KareNot\<video>\notlar.txt), in the old VLC extension format:
+// seconds <TAB> time <TAB> type <TAB> note <TAB> video <TAB> screenshot, extended with status <TAB> severity <TAB> end seconds
+// <TAB> clip. Trailing empty columns are not written, so plain notes keep the old six-column lines. The IINA plugin (iina\)
+// reads and writes the same files. Screenshots and clips are file names in the video's ss\.
 sealed class NoteStore
 {
     const string Header = "# saniye\tzaman\ttur\tnot\tvideo\tss\tdurum\tonem\tbitis\tklip";
@@ -150,14 +171,10 @@ sealed class NoteStore
 
     public static string Clean(string text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
 
-    static string VideoFile(string video)
-    {
-        var name = video;
-        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
-        return Path.Combine(Paths.NotesDir, name + ".txt");
-    }
+    // Identity of a note when merging files (status, severity and media may differ between copies).
+    public static string Key(Note n) => string.Join('\t', n.Video, n.T.ToString("0.00", CultureInfo.InvariantCulture), n.Kind, Clean(n.Text));
 
-    static List<Note> ReadFile(string path)
+    public static List<Note> ReadFile(string path)
     {
         var result = new List<Note>();
         if (!File.Exists(path)) return result;
@@ -184,32 +201,15 @@ sealed class NoteStore
         return result;
     }
 
+    // Every KareNot\*\notlar.txt (run Migration first).
+    public static List<Note> ReadAll() => !Directory.Exists(Paths.Root) ? new List<Note>()
+        : Directory.GetDirectories(Paths.Root).SelectMany(d => ReadFile(Path.Combine(d, "notlar.txt"))).ToList();
+
     public void Load()
     {
         All.Clear();
-        var videos = new HashSet<string>();
-        if (Directory.Exists(Paths.NotesDir))
-        {
-            foreach (var file in Directory.GetFiles(Paths.NotesDir, "*.txt"))
-            {
-                foreach (var n in ReadFile(file))
-                {
-                    All.Add(n);
-                    videos.Add(n.Video);
-                }
-            }
-        }
-
-        // Notes from the combined file whose video has no own file yet (e.g. written by the VLC extension).
-        var migrated = new HashSet<string>();
-        foreach (var n in ReadFile(Paths.CombinedFile))
-        {
-            if (videos.Contains(n.Video)) continue;
-            All.Add(n);
-            migrated.Add(n.Video);
-        }
+        All.AddRange(ReadAll());
         Sort();
-        foreach (var v in migrated) SaveVideo(v);
     }
 
     void Sort() => All.Sort((a, b) =>
@@ -229,20 +229,21 @@ sealed class NoteStore
         return string.Join('\t', cols);
     }
 
+    // Writes the video's notlar.txt with the notes of every video sharing its folder.
     void SaveVideo(string video)
     {
-        var notes = All.Where(n => n.Video == video).ToList();
-        var path = VideoFile(video);
+        var notes = All.Where(n => Paths.SameFolder(n.Video, video)).ToList();
+        var path = Paths.NotesFile(video);
         if (notes.Count == 0)
         {
             if (File.Exists(path)) File.Delete(path);
             return;
         }
-        Directory.CreateDirectory(Paths.NotesDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
         WriteAtomic(path, notes);
     }
 
-    static void WriteAtomic(string path, IEnumerable<Note> notes)
+    public static void WriteAtomic(string path, IEnumerable<Note> notes)
     {
         var sb = new StringBuilder();
         sb.Append(Header).Append('\n');
@@ -252,12 +253,10 @@ sealed class NoteStore
         File.Move(tmp, path, true);
     }
 
-    // Saves the video's own file and the combined file.
     public void Save(string video)
     {
         Sort();
         SaveVideo(video);
-        WriteAtomic(Paths.CombinedFile, All);
     }
 
     public Note Add(double t, string kind, string text, string video, string shot)
@@ -284,20 +283,153 @@ sealed class NoteStore
         Save(video);
     }
 
-    // Finds the screenshot file of a note; old VLC notes only stored a prefix of the file name.
-    public static string ResolveShot(string shot)
+    // File names of a note's screenshot / clip in its video's ss\, or null; old VLC notes only stored a prefix of the shot name.
+    public static string ResolveShot(Note n) => FindMedia(Paths.ShotsDir(n.Video), n.Shot, true);
+    public static string ResolveClip(Note n) => FindMedia(Paths.ShotsDir(n.Video), n.Clip, false);
+
+    public static string FindMedia(string dir, string name, bool prefix)
     {
-        if (string.IsNullOrEmpty(shot) || !Directory.Exists(Paths.ShotsDir)) return null;
-        if (File.Exists(Path.Combine(Paths.ShotsDir, shot))) return shot;
-        return Directory.GetFiles(Paths.ShotsDir, shot + "*").Select(Path.GetFileName).OrderBy(x => x).FirstOrDefault();
+        if (string.IsNullOrEmpty(name) || !Directory.Exists(dir)) return null;
+        if (File.Exists(Path.Combine(dir, name))) return name;
+        return prefix ? Directory.GetFiles(dir, name + "*").Select(Path.GetFileName).OrderBy(x => x).FirstOrDefault() : null;
     }
 
-    // Writes rapor.md and rapor.html for all notes; returns the Markdown path.
-    public string WriteReport(out int missing)
+    // Writes rapor.md and rapor.html into the video's folder (the notes of that folder), or for all notes into the root when
+    // video is null; returns the Markdown path.
+    public string WriteReport(string video, out int missing)
     {
-        Directory.CreateDirectory(Paths.WorkDir);
-        File.WriteAllText(Paths.ReportFile, Reports.Markdown(All, out missing), Utf8);
-        File.WriteAllText(Paths.HtmlReportFile, Reports.Html(All), Utf8);
-        return Paths.ReportFile;
+        var notes = video == null ? All : All.Where(n => Paths.SameFolder(n.Video, video)).ToList();
+        Func<string, string> media = video == null ? Reports.FolderMedia : null;
+        Directory.CreateDirectory(Paths.Dir(video));
+        File.WriteAllText(Paths.ReportFile(video), Reports.Markdown(notes, out missing, media), Utf8);
+        File.WriteAllText(Paths.HtmlReportFile(video), Reports.Html(notes, media), Utf8);
+        return Paths.ReportFile(video);
+    }
+}
+
+// One-time move from the layout before v1.3 (Desktop\Video Notlari\notlar\<video>.txt, one shared ss\, combined files) to
+// Desktop\KareNot\<video>\. Runs at startup before loading and can run again after a failure: notes already in the new files are
+// not added twice, media are copied (identical copies are reused) and their old files deleted only after all notes are written.
+// The old folder is then renamed to "Video Notlari (eski)", with its reports and exports in it.
+static class Migration
+{
+    // Returns a message for the status line (null when there was nothing to move) and whether it failed.
+    public static (string Message, bool Failed) Run()
+    {
+        var oldDir = Paths.OldDir;
+        var combined = Paths.OldCombinedFiles.Where(File.Exists).ToList();
+        if (!Directory.Exists(oldDir) && combined.Count == 0) return (null, false);
+        try
+        {
+            Directory.CreateDirectory(Paths.Root);
+            var oldNotesDir = Path.Combine(oldDir, "notlar");
+            var notes = Directory.Exists(oldNotesDir) ? Directory.GetFiles(oldNotesDir, "*.txt").SelectMany(NoteStore.ReadFile).ToList() : new List<Note>();
+            // Combined files only for videos found nowhere else.
+            var known = new HashSet<string>(notes.Concat(NoteStore.ReadAll()).Select(n => n.Video));
+            notes.AddRange(combined.SelectMany(NoteStore.ReadFile).Where(n => !known.Contains(n.Video)));
+
+            var copied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int added = 0;
+            foreach (var group in notes.GroupBy(n => Paths.FolderName(n.Video), StringComparer.OrdinalIgnoreCase))
+            {
+                var file = Paths.NotesFile(group.First().Video);
+                var merged = NoteStore.ReadFile(file);
+                var keys = new HashSet<string>(merged.Select(NoteStore.Key));
+                int before = merged.Count;
+                foreach (var n in group.Where(n => keys.Add(NoteStore.Key(n))))
+                {
+                    n.Shot = CopyMedia(n.Shot, true, Paths.ShotsDir(n.Video), copied);
+                    n.Clip = CopyMedia(n.Clip, false, Paths.ShotsDir(n.Video), copied);
+                    merged.Add(n);
+                }
+                if (merged.Count == before) continue;
+                added += merged.Count - before;
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                NoteStore.WriteAtomic(file, merged.OrderBy(n => n.Video, StringComparer.Ordinal).ThenBy(n => n.T));
+            }
+            foreach (var source in copied.Keys.Select(k => k.Split('|')[0]).Distinct())
+                try { File.Delete(source); } catch { }
+
+            // Shared files: review progress (merged into an existing one), editable lists.
+            var oldReview = Path.Combine(oldDir, "inceleme.json");
+            if (File.Exists(oldReview))
+            {
+                if (!File.Exists(Paths.ReviewFile)) File.Move(oldReview, Paths.ReviewFile);
+                else MergeReview(oldReview, Paths.ReviewFile);
+            }
+            foreach (var name in new[] { "hazir_notlar.txt", "kufur_listesi.txt" })
+                if (File.Exists(Path.Combine(oldDir, name)) && !File.Exists(Path.Combine(Paths.Root, name)))
+                    File.Move(Path.Combine(oldDir, name), Path.Combine(Paths.Root, name));
+            foreach (var file in combined)
+            {
+                var target = Path.Combine(Paths.Root, "video_notlari_eski.txt");
+                for (int i = 2; File.Exists(target); i++) target = Path.Combine(Paths.Root, $"video_notlari_eski_{i}.txt");
+                File.Move(file, target);
+            }
+
+            var renamed = "";
+            if (Directory.Exists(oldDir))
+            {
+                var target = oldDir + " (eski)";
+                for (int i = 2; Directory.Exists(target) || File.Exists(target); i++) target = $"{oldDir} (eski {i})";
+                Directory.Move(oldDir, target);
+                renamed = $" Eski klasör: {Path.GetFileName(target)}.";
+            }
+            var message = $"Eski veriler Masaüstü\\KareNot klasörüne taşındı ({added} not, {copied.Count} SS / klip).{renamed}";
+            Log(message);
+            return (message, false);
+        }
+        catch (Exception ex)
+        {
+            var message = $"HATA: eski veriler taşınamadı, yerinde duruyor ({oldDir}): {ex.Message}";
+            Log(message + "\n" + ex);
+            return (message, true);
+        }
+    }
+
+    // Copies a screenshot / clip of the old shared ss\ into the video's ss\; returns its name there (suffixed when the name is
+    // taken by another file). A missing file keeps its reference.
+    static string CopyMedia(string name, bool prefix, string dir, Dictionary<string, string> copied)
+    {
+        var oldShots = Path.Combine(Paths.OldDir, "ss");
+        var found = NoteStore.FindMedia(oldShots, name, prefix);
+        if (found == null) return name;
+        var source = Path.Combine(oldShots, found);
+        if (copied.TryGetValue(source + "|" + dir, out var done)) return done;
+        Directory.CreateDirectory(dir);
+        var target = found;
+        for (int i = 2; File.Exists(Path.Combine(dir, target)) && !SameContent(source, Path.Combine(dir, target)); i++)
+            target = Path.GetFileNameWithoutExtension(found) + "_" + i + Path.GetExtension(found);
+        if (!File.Exists(Path.Combine(dir, target))) File.Copy(source, Path.Combine(dir, target));
+        return copied[source + "|" + dir] = target;
+    }
+
+    static bool SameContent(string a, string b) =>
+        new FileInfo(a).Length == new FileInfo(b).Length && File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
+
+    // Adds the old file's videos and keys that the new inceleme.json does not have; an unreadable old file is left alone.
+    static void MergeReview(string oldFile, string newFile)
+    {
+        JsonObject old;
+        try { old = JsonNode.Parse(File.ReadAllText(oldFile)) as JsonObject; } catch { return; }
+        if (old == null) return;
+        var root = JsonNode.Parse(File.ReadAllText(newFile)) as JsonObject ?? new JsonObject();
+        foreach (var (video, entry) in old)
+        {
+            if (root[video] is JsonObject current && entry is JsonObject oldEntry)
+            {
+                foreach (var (key, value) in oldEntry)
+                    if (!current.ContainsKey(key)) current[key] = value?.DeepClone();
+            }
+            else if (!root.ContainsKey(video)) root[video] = entry?.DeepClone();
+        }
+        File.WriteAllText(newFile + ".tmp", root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        File.Move(newFile + ".tmp", newFile, true);
+    }
+
+    static void Log(string text)
+    {
+        try { File.AppendAllText(Path.Combine(Paths.Root, "tasima_gunlugu.txt"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}\n", new UTF8Encoding(false)); }
+        catch { }
     }
 }

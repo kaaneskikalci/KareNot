@@ -43,19 +43,46 @@ Ayarlar → Eklentiler (Plugins) üzerinden kurulur.
 
 ## Dosyalar (Windows ile aynı)
 
+Her videonun kendi klasörü var. Klasör adı = video dosyasının uzantısız adı (`Test 1.mp4` → `Test 1`); Windows'ta
+geçersiz karakterler (`\ / : * ? " < > |`) `_` olur, sondaki nokta ve boşluklar atılır, geriye bir şey kalmazsa
+`video`. Kural Windows uygulamasıyla aynı (`Paths.FolderName`).
+
 | Dosya | Ne |
 |---|---|
-| `~/Desktop/Video Notlari/notlar/<video adı>.txt` | Her videonun notları (esas kaynak) |
-| `~/Desktop/video_notlari.txt` | Bütün notlar tek dosyada (her değişiklikte yeniden yazılır) |
-| `~/Desktop/Video Notlari/ss/*.png` | Ekran görüntüleri |
-| `~/Desktop/Video Notlari/rapor.md` | Rapor (menüden ya da paneldeki "Raporu kaydet") |
-| `~/Desktop/Video Notlari/inceleme.json` | Kaldığın yer, "buraya kadar inceledim" |
+| `~/Desktop/KareNot/<video adı>/notlar.txt` | O videonun notları (esas kaynak) |
+| `~/Desktop/KareNot/<video adı>/ss/` | O videonun ekran görüntüleri (ve Windows'ta çıkarılan klipler) |
+| `~/Desktop/KareNot/<video adı>/rapor.md` | O videonun raporu (menüden ya da paneldeki "Raporu kaydet") |
+| `~/Desktop/KareNot/inceleme.json` | Tüm videolar için kaldığın yer, "buraya kadar inceledim" |
+| `~/Desktop/KareNot/video_notlari_eski*.txt` | Taşımadan kalan eski toplu not dosyaları (yalnızca saklanır) |
+
+Adı aynı, uzantısı farklı iki video (`Test 1.mp4`, `Test 1.mkv`) aynı klasörü ve aynı `notlar.txt`'yi paylaşır;
+dosyadaki `video` sütunu tam dosya adıdır, biri kaydedilince diğerinin notları korunur. Tüm notları tek dosyada
+toplayan `video_notlari.txt` artık yazılmaz.
 
 Biçim birebir aynı: UTF-8 (BOM yok), `\n` satır sonu, sekmeyle ayrılmış sütunlar, sondaki boş sütunlar yazılmaz,
-saniyeler `0.00`, zaman `hh:mm:ss.s` (onda bir aşağı yuvarlanır). Video adı geçersiz dosya adı karakteri içeriyorsa
-Windows'taki gibi `_` ile değiştirilir; böylece iki uygulama aynı `notlar/*.txt` dosyasını kullanır.
+saniyeler `0.00`, zaman `hh:mm:ss.s` (onda bir aşağı yuvarlanır).
 Dosyalar önce `.tmp` olarak yazılıp yerine taşınır. Başka bir IINA penceresinin ya da Windows uygulamasının
 (eşitlenen bir Masaüstü varsa) diğer videolara yazdığı notlar, kaydetmeden önce diskten yeniden okunur, ezilmez.
+Bir not hangi `notlar.txt`'den okunduysa oraya geri yazılır; yeni notlar videonun kendi klasörüne gider.
+
+### Eski düzenden taşıma
+
+Eski düzen `~/Desktop/Video Notlari/` (`notlar/<video>.txt`, `ss/`, `inceleme.json`) ve toplu dosyalar
+(`~/Desktop/video_notlari.txt`, `~/Desktop/Video Notlari/video_notlari.txt`). Eklenti açılınca bunlardan biri
+varsa bir kez taşır:
+
+1. Notlar videonun `KareNot/<video adı>/notlar.txt` dosyasına eklenir (orada zaten olan not ikinci kez eklenmez).
+   Toplu dosyadan yalnızca kendi dosyası olmayan videoların notları alınır.
+2. Notların kullandığı SS'ler ve klipler `ss/`'den videonun `ss/` klasörüne taşınır (eski VLC notlarındaki önekle
+   eşleşenler dahil). Hiçbir notun kullanmadığı dosyalar eski klasörde kalır.
+3. Eski `inceleme.json` yenisiyle birleşir (yenide olan değer kazanır, eksik olanlar eskiden gelir).
+4. Toplu dosyalar `KareNot/video_notlari_eski.txt` (doluysa `_2`, `_3` …) olarak taşınır.
+5. Eski klasör `~/Desktop/Video Notlari (eski)` olur (o ad doluysa `(eski 2)` …). İçinde kalanlar (eski rapor,
+   kullanılmayan SS'ler, eski `notlar/`) orada durur.
+
+Hiçbir şey silinmez. Bir adım başarısız olursa eski klasör yerinde bırakılır, ekranda "eski notlar taşınamadı" yazar
+ve sonraki açılışta taşıma yeniden denenir (aynı not iki kez eklenmez). Aynı anda açılan birden fazla IINA penceresi
+`KareNot/.tasiniyor` kilit klasörüyle sırayla bekler.
 
 ## Kullanım
 
@@ -102,9 +129,11 @@ ayarı zaten bir yere atladıysa eklenti ayrıca atlamaz.
 
 ### Rapor
 
-`rapor.md`: videoya, sonra türe göre (BUG, DEĞİŞİKLİK, NOT, BİP, kesim başı, kesim sonu) gruplu; her satır
+"Raporu kaydet" açık videonun raporunu `KareNot/<video adı>/rapor.md` olarak yazar (klasörü paylaşan aynı adlı
+videolar da içinde). Türe göre (BUG, DEĞİŞİKLİK, NOT, BİP, kesim başı, kesim sonu) gruplu; her satır
 `- **hh:mm:ss.s** — yazı [Kritik] [Düzeltildi]`, SS'ler `![zaman](ss/<dosya>)` bağlantısıyla. Eski VLC notlarının
-SS adı önek olabilir; `ss/` içinde önekle eşleşen dosya aranır.
+SS adı önek olabilir; videonun `ss/` klasöründe önekle eşleşen dosya aranır. Tüm videoları kapsayan rapor yok.
+"Klasör" düğmesi / "Not klasörünü Finder'da göster" açık videonun klasörünü (yoksa `KareNot`'u) gösterir.
 
 ## Windows'tan farkları
 
@@ -137,6 +166,10 @@ Gerçek IINA'da ilk denemede bakılması gerekenler:
    penceresinden panele geçirmeyebilir; o zaman kutuya bir kez tıkla.
 6. **Döngü (L)** mpv'nin A-B döngüsünü (`ab-loop-a/b`) kullanır; IINA'nın kendi A-B döngü göstergesinde de görünebilir.
 7. Birden fazla IINA penceresi aynı **aynı videoyu** açıp ikisinde not alırsa son yazan kazanır (farklı videolar sorun değil).
+8. **Taşıma** IINA'da hiç denenmedi (yalnızca sahte bir IINA API'siyle Windows'ta). `/bin/mkdir`, `/bin/mv`, `/bin/cp`,
+   `/bin/rmdir` çalıştırır; `file.exists`'in klasörler için de doğru sonuç verdiği varsayıldı.
+9. Klasör adları büyük/küçük harf duyarsız karşılaştırılır (Windows'taki gibi); `Test 1` klasörü varken `test 1.mkv`
+   aynı klasörü kullanır. Büyük/küçük harf duyarlı bir Mac diskinde bu yine aynı klasör sayılır.
 
 Sorun olursa: IINA'nın log penceresinde / eklenti konsolunda `[KareNot]` ile başlayan satırlara bak
 (menü yeri IINA sürümüne göre değişiyor).
@@ -147,4 +180,5 @@ Sorun olursa: IINA'nın log penceresinde / eklenti konsolunda `[KareNot]` ile ba
 - `KareNot.iinaplugin/main.js` — ana betik (her oynatıcı penceresi için ayrı çalışır).
 - `KareNot.iinaplugin/lib/format.js` — not dosyası biçimi, rapor; IINA'ya bağlı değil.
 - `KareNot.iinaplugin/ui/sidebar.*`, `ui/overlay.*` — panel ve video üstü katman (webview).
-- Test: `node iina/test/format_test.js` (biçim kuralları; saniye yuvarlaması .NET'in `0.00` biçimiyle aynı).
+- Test: `node iina/test/format_test.js` (biçim kuralları; saniye yuvarlaması .NET'in `0.00` biçimiyle aynı;
+  klasör adı, not/inceleme birleştirme, SS önek eşleşmesi).

@@ -7,7 +7,7 @@ using System.Text.Json.Nodes;
 namespace KareNot;
 
 // Report and export formats: Markdown / HTML report, CSV, DaVinci Resolve marker EDL, task briefs and editing notes.
-// Media links are relative to the Video Notlari folder (ss/...) unless a prefix is given.
+// Media links are relative: "ss/" inside a video's folder, FolderMedia from the KareNot root, or a prefix per video from the caller.
 static class Reports
 {
     static readonly CultureInfo Tr = new("tr-TR");
@@ -28,7 +28,8 @@ static class Reports
     static string Esc(string s) => (s ?? "").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&#39;");
     static string Url(string prefix, string file) => prefix + Uri.EscapeDataString(file);
     static string Hex(Color c) => $"#{c.R:x2}{c.G:x2}{c.B:x2}";
-    static string ClipFile(Note n) => n.Clip != null && File.Exists(Path.Combine(Paths.ShotsDir, n.Clip)) ? n.Clip : null;
+    // Link prefix of a video's ss\ seen from the KareNot root.
+    public static string FolderMedia(string video) => Uri.EscapeDataString(Paths.FolderName(video)) + "/ss/";
 
     static string Md(string s)
     {
@@ -53,9 +54,9 @@ static class Reports
 
     sealed record Item(string Time, string Extra, string Text, List<string> Tags, string Warning, string Shot, string ShotMissing, string Clip, string ClipMissing, bool Done);
     sealed record Section(string Title, string Kind, List<Item> Items, string Footer);
-    sealed record VideoPart(string Video, string Session, List<(string Text, string Kind)> Counts, List<Section> Sections);
+    sealed record VideoPart(string Video, string Media, string Session, List<(string Text, string Kind)> Counts, List<Section> Sections);
 
-    static List<VideoPart> Build(IEnumerable<Note> all, ref int missing)
+    static List<VideoPart> Build(IEnumerable<Note> all, Func<string, string> media, ref int missing)
     {
         var parts = new List<VideoPart>();
         int lost = 0;
@@ -84,12 +85,12 @@ static class Reports
                 string shot = null, shotMissing = null, clip = null, clipMissing = null;
                 if (n.Shot != null)
                 {
-                    shot = NoteStore.ResolveShot(n.Shot);
+                    shot = NoteStore.ResolveShot(n);
                     if (shot == null) { lost++; shotMissing = n.Shot; }
                 }
                 if (n.Clip != null)
                 {
-                    clip = ClipFile(n);
+                    clip = NoteStore.ResolveClip(n);
                     if (clip == null) clipMissing = n.Clip;
                 }
                 return new Item(NoteStore.Fmt(n.T), null, n.Text.Length > 0 ? n.Text : "(açıklama yok)", Tags(n), null, shot, shotMissing, clip, clipMissing, n.Status == "DUZELTILDI");
@@ -117,16 +118,17 @@ static class Reports
             }
             foreach (var kind in notes.Select(n => n.Kind).Where(k => !Kinds.All.Contains(k)).Distinct())
                 sections.Add(new Section(Kinds.ReportTitle(kind), kind, notes.Where(n => n.Kind == kind).Select(GameItem).ToList(), null));
-            parts.Add(new VideoPart(video, string.Join(" · ", session), counts, sections));
+            parts.Add(new VideoPart(video, media?.Invoke(video) ?? "ss/", string.Join(" · ", session), counts, sections));
         }
         missing += lost;
         return parts;
     }
 
-    public static string Markdown(IReadOnlyCollection<Note> notes, out int missing)
+    // media: link prefix of a video's files (null: "ss/").
+    public static string Markdown(IReadOnlyCollection<Note> notes, out int missing, Func<string, string> media = null)
     {
         missing = 0;
-        var parts = Build(notes, ref missing);
+        var parts = Build(notes, media, ref missing);
         var sb = new StringBuilder();
         sb.Append("# KareNot raporu\n\n");
         sb.Append("Oluşturuldu: ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm", Inv)).Append($" · {parts.Count} video, {notes.Count} not\n\n");
@@ -146,9 +148,9 @@ static class Reports
                     foreach (var t in it.Tags) sb.Append(" `").Append(t).Append('`');
                     if (it.Warning != null) sb.Append(" — ⚠ ").Append(it.Warning);
                     sb.Append('\n');
-                    if (it.Shot != null) sb.Append("\n  ![").Append(it.Time).Append("](").Append(Url("ss/", it.Shot)).Append(")\n\n");
+                    if (it.Shot != null) sb.Append("\n  ![").Append(it.Time).Append("](").Append(Url(p.Media, it.Shot)).Append(")\n\n");
                     if (it.ShotMissing != null) sb.Append("  - (SS bulunamadı: ").Append(Md(it.ShotMissing)).Append(")\n");
-                    if (it.Clip != null) sb.Append("  [Klip](").Append(Url("ss/", it.Clip)).Append(")\n\n");
+                    if (it.Clip != null) sb.Append("  [Klip](").Append(Url(p.Media, it.Clip)).Append(")\n\n");
                     if (it.ClipMissing != null) sb.Append("  - (Klip bulunamadı: ").Append(Md(it.ClipMissing)).Append(")\n");
                 }
                 if (s.Footer != null) sb.Append('\n').Append(s.Footer).Append('\n');
@@ -185,10 +187,10 @@ li.done .txt{text-decoration:line-through}
 .foot{color:#aaa;margin-top:8px}
 ";
 
-    public static string Html(IReadOnlyCollection<Note> notes)
+    public static string Html(IReadOnlyCollection<Note> notes, Func<string, string> media = null)
     {
         int missing = 0;
-        var parts = Build(notes, ref missing);
+        var parts = Build(notes, media, ref missing);
         var sb = new StringBuilder();
         sb.Append("<!doctype html>\n<html lang=\"tr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>KareNot raporu</title><style>").Append(Css).Append("</style></head><body><main>\n");
@@ -223,10 +225,10 @@ li.done .txt{text-decoration:line-through}
                         sb.Append("<div class=\"media\">");
                         if (it.Shot != null)
                         {
-                            var url = Esc(Url("ss/", it.Shot));
+                            var url = Esc(Url(p.Media, it.Shot));
                             sb.Append($"<a href=\"{url}\" target=\"_blank\"><img src=\"{url}\" loading=\"lazy\" alt=\"{Esc(it.Time)}\"></a>");
                         }
-                        if (it.Clip != null) sb.Append($"<video controls preload=\"none\" src=\"{Esc(Url("ss/", it.Clip))}\"></video>");
+                        if (it.Clip != null) sb.Append($"<video controls preload=\"none\" src=\"{Esc(Url(p.Media, it.Clip))}\"></video>");
                         sb.Append("</div>");
                     }
                     if (it.ShotMissing != null) sb.Append("<div class=\"miss\">SS bulunamadı: ").Append(Esc(it.ShotMissing)).Append("</div>");
@@ -267,7 +269,7 @@ li.done .txt{text-decoration:line-through}
             sb.Append(string.Join(";", new[]
             {
                 n.Video, n.T.ToString("0.00", Tr), NoteStore.Fmt(n.T), Kinds.Label(n.Kind), game ? Statuses.Label(n.Status) : "",
-                Severities.Label(n.Severity), n.End is double e ? NoteStore.Fmt(e) : "", n.Text, NoteStore.ResolveShot(n.Shot) ?? n.Shot ?? "", n.Clip ?? "",
+                Severities.Label(n.Severity), n.End is double e ? NoteStore.Fmt(e) : "", n.Text, NoteStore.ResolveShot(n) ?? n.Shot ?? "", n.Clip ?? "",
             }.Select(Q))).Append("\r\n");
         }
         return sb.ToString();
@@ -321,10 +323,11 @@ li.done .txt{text-decoration:line-through}
 
     static int SeverityRank(string s) => s switch { "KRITIK" => 0, "ORTA" => 1, "DUSUK" => 2, _ => 3 };
 
-    // One task. mediaPrefix: relative link prefix for ss files (e.g. "ss/" in the ZIP, "../ss/" next to cikti\);
+    // One task. media: relative link prefix of a video's ss files (e.g. "ss/" in the ZIP, "../ss/" in the video's cikti\);
     // null for the clipboard, where only absolute paths make sense.
-    public static string TaskText(Note n, string mediaPrefix, int level = 2)
+    public static string TaskText(Note n, Func<string, string> media, int level = 2)
     {
+        var mediaPrefix = media?.Invoke(n.Video);
         var sb = new StringBuilder();
         var text = n.Text.Length > 0 ? n.Text : "(açıklama yok)";
         sb.Append(new string('#', level)).Append(" [").Append(Kinds.Label(n.Kind)).Append("] ").Append(Md(text)).Append("\n\n");
@@ -336,21 +339,21 @@ li.done .txt{text-decoration:line-through}
         var tester = ReviewStore.Tester(n.Video);
         if (build.Length > 0 || tester.Length > 0)
             sb.Append("- ").Append(string.Join(" · ", new[] { build.Length > 0 ? "**Build:** " + Md(build) : null, tester.Length > 0 ? "**Testçi:** " + Md(tester) : null }.Where(x => x != null))).Append('\n');
-        var shot = NoteStore.ResolveShot(n.Shot);
-        var clip = ClipFile(n);
+        var shot = NoteStore.ResolveShot(n);
+        var clip = NoteStore.ResolveClip(n);
         var absolute = new List<string>();
         if (shot != null)
         {
             sb.Append("- **Ekran görüntüsü:** ");
             sb.Append(mediaPrefix != null ? $"[{Md(shot)}]({Url(mediaPrefix, shot)})" : "`" + shot + "`");
             sb.Append(" (kırmızı çerçeve varsa sorunlu alanı gösterir)\n");
-            absolute.Add(Path.Combine(Paths.ShotsDir, shot));
+            absolute.Add(Path.Combine(Paths.ShotsDir(n.Video), shot));
         }
         else if (n.Shot != null) sb.Append("- **Ekran görüntüsü:** bulunamadı (").Append(Md(n.Shot)).Append(")\n");
         if (clip != null)
         {
             sb.Append("- **Klip:** ").Append(mediaPrefix != null ? $"[{Md(clip)}]({Url(mediaPrefix, clip)})" : "`" + clip + "`").Append('\n');
-            absolute.Add(Path.Combine(Paths.ShotsDir, clip));
+            absolute.Add(Path.Combine(Paths.ShotsDir(n.Video), clip));
         }
         if (absolute.Count > 0) sb.Append("- Tam yol: ").Append(string.Join(", ", absolute.Select(a => "`" + a + "`"))).Append('\n');
         sb.Append('\n');
@@ -359,7 +362,7 @@ li.done .txt{text-decoration:line-through}
         return sb.ToString();
     }
 
-    public static string TaskList(IEnumerable<Note> notes, string title, string mediaPrefix)
+    public static string TaskList(IEnumerable<Note> notes, string title, Func<string, string> media)
     {
         var list = notes.Where(n => !Kinds.IsEdit(n.Kind))
             .OrderBy(n => Array.IndexOf(GameKinds, n.Kind) is var i && i >= 0 ? i : 9)
@@ -372,7 +375,7 @@ li.done .txt{text-decoration:line-through}
         sb.Append("Oyun testi kayıtlarından KareNot ile çıkarıldı. Her görev videodaki bir ana bağlıdır ve tek başına ele alınabilir; ")
             .Append("sıra: buglar, değişiklikler, notlar, her grupta önce kritik olanlar. Ekran görüntülerindeki kırmızı çerçeve sorunlu alanı gösterir. ")
             .Append("**Beklenen / Gözlenen / Kabul ölçütü** satırlarını doldurup görevi verebilirsin.\n\n");
-        foreach (var n in list) sb.Append("---\n\n").Append(TaskText(n, mediaPrefix)).Append('\n');
+        foreach (var n in list) sb.Append("---\n\n").Append(TaskText(n, media)).Append('\n');
         if (list.Count == 0) sb.Append("_Açık görev yok._\n");
         return sb.ToString();
     }
@@ -382,7 +385,7 @@ li.done .txt{text-decoration:line-through}
     public sealed record EditVideo(string Video, string Path, double? Length, double? Fps, IReadOnlyList<Note> Notes, double BeepDefault);
 
     static double R(double v) => Math.Round(v, 3);
-    static string Abs(string file) => file == null ? null : System.IO.Path.Combine(Paths.ShotsDir, file);
+    static string Abs(Note n, string file) => file == null ? null : System.IO.Path.Combine(Paths.ShotsDir(n.Video), file);
 
     public static string EditJson(EditVideo v)
     {
@@ -414,7 +417,7 @@ li.done .txt{text-decoration:line-through}
             game.Add(new JsonObject
             {
                 ["t"] = R(n.T), ["time"] = NoteStore.Fmt(n.T), ["kind"] = n.Kind, ["text"] = n.Text, ["status"] = n.Status ?? "ACIK", ["severity"] = n.Severity,
-                ["screenshot"] = Abs(NoteStore.ResolveShot(n.Shot)), ["clip"] = Abs(ClipFile(n)),
+                ["screenshot"] = Abs(n, NoteStore.ResolveShot(n)), ["clip"] = Abs(n, NoteStore.ResolveClip(n)),
             });
         var root = new JsonObject
         {

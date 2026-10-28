@@ -15,6 +15,54 @@ sealed partial class MainForm
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point p);
 
+    // "--profile-area <log> <video>": times the area selection on a real recording with simulated mouse events.
+    public async Task ProfileArea(string logPath, string video)
+    {
+        var log = new StringBuilder();
+        var sw = new System.Diagnostics.Stopwatch();
+        void Step(string what) { log.AppendLine($"{sw.ElapsedMilliseconds,6} ms  {what}"); sw.Restart(); }
+        try
+        {
+            await Task.Delay(500);
+            OpenVideo(video);
+            await Task.Delay(2500);
+            player.Seek(50000);
+            await Task.Delay(1000);
+            sw.Start();
+            var size = videoPanel.ClientSize;
+            var a = new Point(size.Width / 4, size.Height / 4);
+            VideoMouseDown(videoPanel, new MouseEventArgs(MouseButtons.Left, 1, a.X, a.Y, 0));
+            Step("mouse down");
+            VideoMouseMove(videoPanel, new MouseEventArgs(MouseButtons.Left, 0, a.X + 20, a.Y + 20, 0));
+            Step($"first move (freeze frame {overlay.Frame?.Width}x{overlay.Frame?.Height}, region {RegionActive})");
+            Update();
+            Step("first paint");
+            long movesMs = 0, max = 0;
+            for (int i = 0; i < 60; i++)
+            {
+                var t0 = sw.ElapsedMilliseconds;
+                VideoMouseMove(videoPanel, new MouseEventArgs(MouseButtons.Left, 0, a.X + 20 + i * 8, a.Y + 20 + i * 5, 0));
+                overlay.Update();
+                var d = sw.ElapsedMilliseconds - t0;
+                movesMs += d;
+                max = Math.Max(max, d);
+            }
+            Step($"60 moves with paint: avg {movesMs / 60.0:0.0} ms, max {max} ms");
+            VideoMouseUp(videoPanel, new MouseEventArgs(MouseButtons.Left, 1, a.X + 500, a.Y + 300, 0));
+            Step("mouse up (focus note box, badges)");
+            for (int i = 0; i < 10; i++) { UpdatePlayerUi(); Application.DoEvents(); }
+            Step("10 ui ticks while selected");
+            noteBox.Text = "profil";
+            AddNote("DEGISIKLIK", false);
+            Step("add note with marked screenshot");
+            Application.DoEvents();
+            Step("pending messages");
+        }
+        catch (Exception ex) { log.AppendLine("EXCEPTION " + ex); }
+        File.WriteAllText(logPath, log.ToString());
+        Close();
+    }
+
     public async Task RunSelfTest(string logPath, string video)
     {
         var log = new StringBuilder();
@@ -68,9 +116,9 @@ sealed partial class MainForm
             AddNote("BUG", false);
             var bug = store.All.LastOrDefault(n => n.Video == currentVideo && n.Kind == "BUG");
             Check(bug != null && bug.Text == "test bug notu" && Math.Abs(bug.T - 3) < 0.5, "BUG note at 3 s");
-            Check(bug?.Shot != null && File.Exists(Path.Combine(Paths.ShotsDir, bug.Shot)), "BUG screenshot " + bug?.Shot);
+            Check(bug?.Shot != null && File.Exists(Path.Combine(Paths.ShotsDir(currentVideo), bug.Shot)), "BUG screenshot " + bug?.Shot);
             if (bug?.Shot != null)
-                using (var img = Image.FromFile(Path.Combine(Paths.ShotsDir, bug.Shot)))
+                using (var img = Image.FromFile(Path.Combine(Paths.ShotsDir(currentVideo), bug.Shot)))
                     Info($"screenshot size {img.Width}x{img.Height}");
 
             // Area selection through the same mouse handlers the window uses.
@@ -115,7 +163,7 @@ sealed partial class MainForm
             var change = store.All.LastOrDefault(n => n.Video == currentVideo && n.Kind == "DEGISIKLIK");
             Check(change?.Shot != null, "DEGISIKLIK with marked screenshot");
             if (change?.Shot != null)
-                using (var img = new Bitmap(Path.Combine(Paths.ShotsDir, change.Shot)))
+                using (var img = new Bitmap(Path.Combine(Paths.ShotsDir(currentVideo), change.Shot)))
                 {
                     var edge = img.GetPixel(selection.X + 1, selection.Y + selection.Height / 2);
                     Check(edge.R > 200 && edge.G < 60 && edge.B < 60, "red frame on screenshot at selection edge " + edge);
@@ -208,28 +256,54 @@ sealed partial class MainForm
             await Wait(1500);
             Check(Math.Abs(player.TimeMs - 2000) < 600 && player.HasVideo, "seek after the end -> " + player.TimeMs + " state " + player.State);
 
-            // Files.
-            var perVideo = Directory.GetFiles(Paths.NotesDir, "*.txt");
-            Check(perVideo.Length == 1, "per-video note file " + string.Join(", ", perVideo.Select(Path.GetFileName)));
-            var combined = File.ReadAllLines(Paths.CombinedFile);
-            Check(combined.Length == 6 && combined[0].StartsWith("# saniye"), "combined file has header + 5 notes");
-            Info("combined line: " + combined[1]);
-            var report = store.WriteReport(out var missing);
+            // Files: KareNot\<video>\notlar.txt, ss\ and the video's report.
+            var videoDir = Path.Combine(Paths.Root, Path.GetFileNameWithoutExtension(currentVideo));
+            var noteFiles = Directory.GetDirectories(Paths.Root).Select(d => Path.Combine(d, "notlar.txt")).Where(File.Exists).ToList();
+            Check(noteFiles.Count == 1 && noteFiles[0] == Path.Combine(videoDir, "notlar.txt") && Paths.NotesFile(currentVideo) == noteFiles[0],
+                "per-video note file " + string.Join(", ", noteFiles));
+            var shots = CurrentNotes().Where(n => n.Shot != null).ToList();
+            Check(Paths.ShotsDir(currentVideo) == Path.Combine(videoDir, "ss") && shots.Count >= 2 && shots.All(n => File.Exists(Path.Combine(videoDir, "ss", n.Shot))),
+                $"{shots.Count} screenshots in the video's ss folder");
+            var videoLines = File.ReadAllLines(noteFiles[0]);
+            Check(videoLines.Length == 6 && videoLines[0].StartsWith("# saniye"), "note file has header + 5 notes");
+            Info("note line: " + videoLines[1]);
+            Check(Paths.OldCombinedFiles.All(f => !File.Exists(f)), "no combined file of all notes is written");
+            var report = store.WriteReport(currentVideo, out var missing);
             var md = File.ReadAllText(report);
-            Check(missing == 0 && md.Contains("### Buglar") && md.Contains("![") && md.IndexOf("### Buglar") < md.IndexOf("### Bip"), "report written, bugs first, screenshots linked");
-            Check(File.Exists(Paths.HtmlReportFile), "HTML report written");
+            Check(report == Path.Combine(videoDir, "rapor.md") && missing == 0 && md.Contains("### Buglar") && md.Contains("](ss/")
+                && md.IndexOf("### Buglar") < md.IndexOf("### Bip"), "report written into the video's folder, bugs first, screenshots linked");
+            Check(File.Exists(Path.Combine(videoDir, "rapor.html")), "HTML report written");
+            var allReport = File.ReadAllText(store.WriteReport(null, out _));
+            Check(File.Exists(Path.Combine(Paths.Root, "rapor.html")) && allReport.Contains("](" + Uri.EscapeDataString(Path.GetFileName(videoDir)) + "/ss/"),
+                "report of all videos in the root links into the video folders");
             Check(Whisper.SelfCheck(), "whisper JSON word parsing");
 
-            // Reload from disk (per-video file wins over the combined file); new columns survive.
+            // Reload from disk; new columns survive. An old combined file adds only the videos missing elsewhere and is retired.
+            File.WriteAllText(Paths.OldCombinedFiles[0], "# saniye\tzaman\ttur\tnot\tvideo\tss\n12.00\t00:00:12.0\tBUG\teski not\teski_video.mp4\t\n" +
+                $"3.00\t00:00:03.0\tBUG\tçift\t{currentVideo}\t\n");
+            Check(!Migration.Run().Failed, "migration of the old combined file");
             var reloaded = new NoteStore();
             reloaded.Load();
-            Check(reloaded.All.Count == 5, "reload gives 5 notes");
-            var bugBack = reloaded.All.First(n => n.Kind == "BUG");
-            var bipBack = reloaded.All.First(n => n.Kind == "BIP");
+            Check(reloaded.All.Count(n => n.Video == currentVideo) == 5 && reloaded.All.Count(n => n.Video == "eski_video.mp4") == 1,
+                "reload gives 5 notes; the old combined file only adds the missing video");
+            Check(!File.Exists(Paths.OldCombinedFiles[0]) && File.Exists(Path.Combine(Paths.Root, "video_notlari_eski.txt"))
+                && File.Exists(Paths.NotesFile("eski_video.mp4")), "old combined file retired into the KareNot folder");
+            var bugBack = reloaded.All.First(n => n.Video == currentVideo && n.Kind == "BUG");
+            var bipBack = reloaded.All.First(n => n.Video == currentVideo && n.Kind == "BIP");
             Check(bugBack.Status == "DUZELTILDI" && bugBack.Severity == "KRITIK" && bipBack.End is double be && Math.Abs(be - bipBack.T - 0.8) < 0.02,
                 "status, severity and BIP end saved");
-            var lines = File.ReadAllLines(Directory.GetFiles(Paths.NotesDir, "*.txt")[0]);
+            var lines = File.ReadAllLines(noteFiles[0]);
             Check(lines.Any(l => l.Split('\t').Length == 6) && lines.Any(l => l.Split('\t').Length == 8), "plain notes keep six columns, extended ones grow");
+
+            // A video with the same name and another extension shares the folder; saving one keeps the other's notes.
+            var twin = store.Add(1, "NOT", "ikiz", Path.ChangeExtension(currentVideo, ".mkv"), null);
+            Check(File.ReadAllLines(noteFiles[0]).Length == 7 && Paths.VideoDir(twin.Video) == videoDir, "same-named video shares the folder's notlar.txt");
+            store.Save(currentVideo);
+            Check(File.ReadAllLines(noteFiles[0]).Count(l => l.Contains("\tikiz\t")) == 1, "saving one video keeps the other's notes");
+            store.Remove(twin);
+            Check(File.ReadAllLines(noteFiles[0]).Length == 6, "removing it leaves the open video's notes");
+
+            MigrationTest(Check, Info);
 
             // Next video in the folder.
             StepVideo(1);
@@ -239,7 +313,8 @@ sealed partial class MainForm
             Check(gameList.Items.Count == 0 && editList.Items.Count == 0, "lists show only the open video's notes");
             player.Pause();
             await Wait(500);
-            Check(player.TakeSnapshot(Path.Combine(Paths.ShotsDir, "ikinci_video.png"), out var err2), "screenshot of second video " + err2);
+            Directory.CreateDirectory(Paths.ShotsDir(currentVideo));
+            Check(player.TakeSnapshot(Path.Combine(Paths.ShotsDir(currentVideo), "ikinci_video.png"), out var err2), "screenshot of second video " + err2);
 
             TogglePanel();
             Check(split.Panel2Collapsed, "panel hides");
@@ -318,6 +393,64 @@ sealed partial class MainForm
         log.AppendLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
         File.WriteAllText(logPath, log.ToString());
         Close();
+    }
+
+    // Moving an old layout (Video Notlari\notlar, shared ss\, combined file) in a separate data root; synchronous, so nothing
+    // else runs while VIDEONOTLARI_DATA points there.
+    static void MigrationTest(Action<bool, string> Check, Action<string> Info)
+    {
+        var data = Environment.GetEnvironmentVariable("VIDEONOTLARI_DATA");
+        Environment.SetEnvironmentVariable("VIDEONOTLARI_DATA", Path.Combine(Paths.Desktop, "tasima_testi"));
+        try
+        {
+            var old = Paths.OldDir;
+            Directory.CreateDirectory(Path.Combine(old, "notlar"));
+            Directory.CreateDirectory(Path.Combine(old, "ss"));
+            const string header = "# saniye\tzaman\ttur\tnot\tvideo\tss\n";
+            // The BUG screenshot is an old VLC prefix; the NOT has a clip.
+            File.WriteAllText(Path.Combine(old, "notlar", "oyun.mp4.txt"), header + "5.00\t00:00:05.0\tBUG\tduvar\toyun.mp4\tbug_eski\n" +
+                "9.00\t00:00:09.0\tNOT\tklipli\toyun.mp4\t\t\t\t\tnot_klip.mp4\n");
+            File.WriteAllBytes(Path.Combine(old, "ss", "bug_eski_20250101.png"), new byte[] { 1, 2, 3 });
+            File.WriteAllBytes(Path.Combine(old, "ss", "not_klip.mp4"), new byte[] { 4, 5 });
+            File.WriteAllText(Path.Combine(old, "inceleme.json"), "{\"oyun.mp4\": {\"pos\": 7, \"build\": \"b12\"}}");
+            File.WriteAllText(Path.Combine(old, "hazir_notlar.txt"), "Eski metin\n");
+            File.WriteAllText(Paths.OldCombinedFiles[0], header + "5.00\t00:00:05.0\tBUG\tduvar\toyun.mp4\tbug_eski\n12.00\t00:00:12.0\tNOT\tbaska\tbaska.mkv\t\n");
+            // Already in the new layout: review entries and another file with the screenshot's name.
+            Directory.CreateDirectory(Paths.ShotsDir("oyun.mp4"));
+            File.WriteAllBytes(Path.Combine(Paths.ShotsDir("oyun.mp4"), "bug_eski_20250101.png"), new byte[] { 9 });
+            File.WriteAllText(Paths.ReviewFile, "{\"oyun.mp4\": {\"pos\": 30}, \"yeni.mp4\": {\"done\": true}}");
+
+            var result = Migration.Run();
+            Info("migration: " + result.Message);
+            var moved = NoteStore.ReadAll();
+            Check(!result.Failed && moved.Count(n => n.Video == "oyun.mp4") == 2 && moved.Count(n => n.Video == "baska.mkv") == 1
+                && File.Exists(Path.Combine(Paths.Root, "oyun", "notlar.txt")) && File.Exists(Path.Combine(Paths.Root, "baska", "notlar.txt")),
+                "migration: notes in KareNot\\<video>\\notlar.txt, combined file only for the missing video");
+            var bug = moved.FirstOrDefault(n => n.Kind == "BUG");
+            var ss = Paths.ShotsDir("oyun.mp4");
+            Check(bug?.Shot == "bug_eski_20250101_2.png" && NoteStore.ResolveShot(bug) == bug.Shot && new FileInfo(Path.Combine(ss, bug.Shot)).Length == 3
+                && new FileInfo(Path.Combine(ss, "bug_eski_20250101.png")).Length == 1, "migration: screenshot moved into the video's ss, a taken name keeps both: " + bug?.Shot);
+            Check(NoteStore.ResolveClip(moved.First(n => n.Kind == "NOT" && n.Video == "oyun.mp4")) == "not_klip.mp4", "migration: clip moved");
+            var review = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Paths.ReviewFile));
+            Check(review["oyun.mp4"]["pos"].GetValue<double>() == 30 && review["oyun.mp4"]["build"].GetValue<string>() == "b12" && review["yeni.mp4"] != null,
+                "migration: inceleme.json merged");
+            Check(File.Exists(TextLists.TemplatesFile) && File.Exists(Path.Combine(Paths.Root, "video_notlari_eski.txt")) && !File.Exists(Paths.OldCombinedFiles[0]),
+                "migration: lists moved, combined file retired");
+            Check(!Directory.Exists(old) && File.Exists(Path.Combine(old + " (eski)", "notlar", "oyun.mp4.txt")) && File.Exists(Path.Combine(old + " (eski)", "inceleme.json"))
+                && !File.Exists(Path.Combine(old + " (eski)", "ss", "bug_eski_20250101.png")), "migration: old folder renamed to 'Video Notlari (eski)'");
+
+            // The same old notes once more: nothing doubles, the next old folder becomes "(eski 2)".
+            Directory.CreateDirectory(Path.Combine(old, "notlar"));
+            File.Copy(Path.Combine(old + " (eski)", "notlar", "oyun.mp4.txt"), Path.Combine(old, "notlar", "oyun.mp4.txt"));
+            var again = Migration.Run();
+            Check(!again.Failed && NoteStore.ReadAll().Count == 3 && Directory.Exists(old + " (eski 2)"), "migration again: no duplicate notes; " + again.Message);
+            Check(Migration.Run().Message == null, "migration: nothing to do without old data");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("VIDEONOTLARI_DATA", data);
+            ReviewStore.Reload();
+        }
     }
 
     void CaptureWindow(string path) => CaptureHandle(Handle, path);

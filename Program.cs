@@ -15,10 +15,14 @@ static class Program
             return;
         }
 
-        if (args.Length == 3 && args[0] == "--selftest")
+        if (args.Length == 3 && args[0] is "--selftest" or "--profile-area")
         {
             var form = new MainForm(null);
-            form.Shown += async (s, e) => await form.RunSelfTest(args[1], args[2]);
+            form.Shown += async (s, e) =>
+            {
+                if (args[0] == "--selftest") await form.RunSelfTest(args[1], args[2]);
+                else await form.ProfileArea(args[1], args[2]);
+            };
             Application.Run(form);
             return;
         }

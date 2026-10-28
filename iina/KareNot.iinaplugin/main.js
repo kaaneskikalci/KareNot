@@ -10,17 +10,54 @@ function log(msg) {
 }
 
 // ---------- Paths (same layout as the Windows app, rooted at ~/Desktop) ----------
+//
+// ~/Desktop/KareNot/inceleme.json            review state of all videos
+// ~/Desktop/KareNot/<video base name>/notlar.txt, ss/, rapor.md
 
 const DESKTOP = utils.resolvePath("~/Desktop").replace(/\/+$/, "");
-const COMBINED = DESKTOP + "/video_notlari.txt";
-const WORK = DESKTOP + "/Video Notlari";
-const NOTES_DIR = WORK + "/notlar";
-const SS_DIR = WORK + "/ss";
-const REPORT = WORK + "/rapor.md";
-const REVIEW = WORK + "/inceleme.json";
+const ROOT = DESKTOP + "/KareNot";
+const REVIEW = ROOT + "/inceleme.json";
+const NOTES_NAME = "notlar.txt";
 
-function videoFile(video) {
-  return NOTES_DIR + "/" + F.safeFileName(video) + ".txt";
+// Layout before v1.4 (migrated once, see migrate()).
+const OLD_WORK = DESKTOP + "/Video Notlari";
+const OLD_NOTES_DIR = OLD_WORK + "/notlar";
+const OLD_SS_DIR = OLD_WORK + "/ss";
+const OLD_REVIEW = OLD_WORK + "/inceleme.json";
+// Combined files of all notes (Desktop: VLC extension and before v1.3; folder: a v1.3 preview).
+const OLD_COMBINED = [DESKTOP + "/video_notlari.txt", OLD_WORK + "/video_notlari.txt"];
+
+// The video's folder; an existing folder (or one queued for writing) whose name differs only in case is reused, so
+// every path of one folder is spelled the same way.
+function folderOf(video) {
+  const name = F.videoFolderName(video);
+  const names = listDir(ROOT).filter((e) => e.isDir).map((e) => e.filename);
+  for (const p of Object.keys(pending)) {
+    if (p.indexOf(ROOT + "/") === 0) {
+      const rest = p.slice(ROOT.length + 1);
+      if (rest.indexOf("/") > 0) names.push(rest.slice(0, rest.indexOf("/")));
+    }
+  }
+  const same = names.find((n) => F.sameFolderName(n, name));
+  return ROOT + "/" + (same || name);
+}
+
+function notesFileOf(video) {
+  return folderOf(video) + "/" + NOTES_NAME;
+}
+
+function dirName(path) {
+  return path.slice(0, path.lastIndexOf("/"));
+}
+
+function baseName(path) {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+// Folder a note belongs to: the folder of the file it was read from (so a note stays where another app put it),
+// otherwise its video's folder.
+function noteFolder(n) {
+  return n.src ? dirName(n.src) : folderOf(n.video);
 }
 
 // ---------- File writing: temp file + rename, serialized through one queue ----------
@@ -28,29 +65,29 @@ function videoFile(video) {
 // Content queued for writing but not on disk yet (null = queued delete); reads look here first.
 const pending = {};
 let queue = Promise.resolve();
-let dirsReady = false;
+const madeDirs = {};
 
 function enqueue(job) {
   queue = queue.then(job).catch((e) => log("write error: " + e));
   return queue;
 }
 
-async function ensureDirs() {
-  if (dirsReady) return true;
+async function ensureDir(dir) {
+  if (madeDirs[dir]) return true;
   try {
-    const r = await utils.exec("/bin/mkdir", ["-p", NOTES_DIR, SS_DIR]);
-    dirsReady = r.status === 0;
-    if (!dirsReady) log("mkdir failed: " + r.stderr);
+    const r = await utils.exec("/bin/mkdir", ["-p", dir]);
+    if (r.status === 0) madeDirs[dir] = true;
+    else log("mkdir failed: " + dir + ": " + r.stderr);
   } catch (e) {
     log("mkdir error: " + e);
   }
-  return dirsReady;
+  return !!madeDirs[dir];
 }
 
 function writeAtomic(path, content) {
   pending[path] = content;
   return enqueue(async () => {
-    await ensureDirs();
+    await ensureDir(dirName(path));
     const tmp = path + ".tmp";
     let ok = false;
     try {
@@ -114,38 +151,35 @@ function withIds(list) {
   return list;
 }
 
-// All per-video files, plus combined-file notes whose video has no per-video file (NoteStore.Load).
+// Paths of all note files: KareNot/*/notlar.txt, plus files queued for writing but not created yet.
+function noteFilePaths() {
+  const paths = listDir(ROOT)
+    .filter((e) => e.isDir)
+    .map((e) => ROOT + "/" + e.filename + "/" + NOTES_NAME)
+    .filter((p) => file.exists(p));
+  const re = /^[^/]+\/notlar\.txt$/;
+  for (const p of Object.keys(pending)) {
+    if (p.indexOf(ROOT + "/") === 0 && re.test(p.slice(ROOT.length + 1)) && paths.indexOf(p) < 0) paths.push(p);
+  }
+  return paths;
+}
+
+// All notes of all videos; each remembers the file it came from (src).
 function readAllFromDisk() {
   const list = [];
-  const videos = {};
-  const paths = listDir(NOTES_DIR)
-    .filter((e) => !e.isDir && /\.txt$/i.test(e.filename))
-    .map((e) => NOTES_DIR + "/" + e.filename);
-  // Files queued for writing but not created yet.
-  for (const p of Object.keys(pending)) {
-    if (p.indexOf(NOTES_DIR + "/") === 0 && /\.txt$/.test(p) && paths.indexOf(p) < 0) paths.push(p);
-  }
-  for (const p of paths) {
+  for (const p of noteFilePaths()) {
     for (const n of F.parseNotes(readText(p))) {
+      n.src = p;
       list.push(n);
-      videos[n.video] = true;
     }
   }
-  const migrated = [];
-  for (const n of F.parseNotes(readText(COMBINED))) {
-    if (videos[n.video]) continue;
-    list.push(n);
-    if (migrated.indexOf(n.video) < 0) migrated.push(n.video);
-  }
   F.sortNotes(list);
-  return { list: list, migrated: migrated };
+  return list;
 }
 
 function reloadAll() {
   const keepSelected = selectedNote();
-  const r = readAllFromDisk();
-  notes = withIds(r.list);
-  for (const v of r.migrated) saveVideoFile(v);
+  notes = withIds(readAllFromDisk());
   // Keep the selection on the same note if it is still there.
   selectedId = null;
   if (keepSelected) {
@@ -154,23 +188,32 @@ function reloadAll() {
   }
 }
 
-function saveVideoFile(video) {
-  const mine = notes.filter((n) => n.video === video);
+// Writes one notlar.txt with every note that belongs to it (all videos sharing the folder); deletes it when empty.
+function saveNotesFile(path) {
+  const mine = notes.filter((n) => n.src === path);
   if (mine.length === 0) {
-    if (file.exists(videoFile(video)) || pending[videoFile(video)] != null) deleteFile(videoFile(video));
+    if (file.exists(path) || pending[path] != null) deleteFile(path);
   } else {
-    writeAtomic(videoFile(video), F.serialize(mine));
+    writeAtomic(path, F.serialize(mine));
   }
 }
 
-// Writes this video's file and the combined file. Other videos are taken from disk first, so a second IINA window
-// or the Windows app (on a synced Desktop) does not get its notes overwritten by stale memory.
+// Writes the file(s) holding this video's notes. Notes of other videos are taken from disk first, so a second IINA
+// window or the Windows app (on a synced Desktop) does not get its notes overwritten by stale memory; the other
+// videos of a shared folder are written back unchanged.
 function persist(video) {
-  const fromDisk = readAllFromDisk().list.filter((n) => n.video !== video);
-  notes = withIds(fromDisk).concat(notes.filter((n) => n.video === video));
+  const disk = readAllFromDisk();
+  const files = [notesFileOf(video)];
+  const add = (p) => { if (p && files.indexOf(p) < 0) files.push(p); };
+  disk.filter((n) => n.video === video).forEach((n) => add(n.src));   // files that may lose a deleted note
+  const mine = notes.filter((n) => n.video === video);
+  for (const n of mine) {
+    if (!n.src) n.src = notesFileOf(video);
+    add(n.src);
+  }
+  notes = withIds(disk.filter((n) => n.video !== video)).concat(mine);
   F.sortNotes(notes);
-  saveVideoFile(video);
-  writeAtomic(COMBINED, F.serialize(notes));
+  files.forEach(saveNotesFile);
 }
 
 function noteById(id) {
@@ -369,9 +412,10 @@ async function addNote(kind, textArg) {
 }
 
 async function takeShot(kind, t) {
-  if (!(await ensureDirs())) { osd("SS klasörü oluşturulamadı"); return null; }
+  const dir = folderOf(video) + "/ss";
+  if (!(await ensureDir(dir))) { osd("SS klasörü oluşturulamadı"); return null; }
   const name = F.shotName(kind, new Date(), t, ++shotCounter);
-  const path = SS_DIR + "/" + name;
+  const path = dir + "/" + name;
   try {
     mpv.command("screenshot-to-file", [path, "video"]);
   } catch (e) {
@@ -612,21 +656,37 @@ async function burnArea(path, f) {
 
 // ---------- Report ----------
 
-function resolveShot(shot) {
-  if (!shot) return null;
-  if (file.exists(SS_DIR + "/" + shot)) return shot;
-  const names = listDir(SS_DIR).filter((e) => !e.isDir).map((e) => e.filename)
-    .filter((n) => n.indexOf(shot) === 0).sort();
-  return names.length ? names[0] : null;
+function fileNames(dir) {
+  return listDir(dir).filter((e) => !e.isDir).map((e) => e.filename);
 }
 
+// Screenshot of a note in its own folder's ss/ (exact name, else prefix match for old VLC notes).
+function resolveShot(shot, n) {
+  if (!shot) return null;
+  const dir = noteFolder(n) + "/ss";
+  if (file.exists(dir + "/" + shot)) return shot;
+  return F.findShot(shot, fileNames(dir));
+}
+
+// rapor.md of the open video, in its folder. Videos sharing the folder are in it too (they share ss/ and the file).
 function writeReport() {
+  if (!video) { osd("KareNot: önce bir video aç"); return; }
   reloadAll();
-  const r = F.buildReport(notes, resolveShot, new Date());
-  writeAtomic(REPORT, r.text).then(() => {
-    osd("Rapor kaydedildi: Masaüstü/Video Notlari/rapor.md" + (r.missing ? " (" + r.missing + " SS bulunamadı)" : ""));
+  const folder = folderOf(video);
+  const mine = notes.filter((n) => noteFolder(n) === folder);
+  if (!mine.some((n) => n.video === video)) { osd("Bu videoda not yok"); pushState(); return; }
+  const r = F.buildReport(mine, resolveShot, new Date());
+  writeAtomic(folder + "/rapor.md", r.text).then(() => {
+    osd("Rapor kaydedildi: Masaüstü/KareNot/" + baseName(folder) + "/rapor.md" +
+      (r.missing ? " (" + r.missing + " SS bulunamadı)" : ""));
   });
   pushState();
+}
+
+function showFolder() {
+  let target = ROOT;
+  if (video && file.exists(folderOf(video))) target = folderOf(video);
+  try { file.showInFinder(target); } catch (e) { log("finder: " + e); }
 }
 
 // ---------- Review progress and resume ----------
@@ -668,6 +728,188 @@ function tryResume(attempt) {
   osd("Kaldığın yerden devam: " + F.fmt(pos));
 }
 
+// ---------- Migration from the old layout (~/Desktop/Video Notlari, before v1.4) ----------
+//
+// Notes are merged into KareNot/<video>/notlar.txt (no duplicates), referenced shots and clips are moved to
+// KareNot/<video>/ss/, inceleme.json is merged into KareNot/inceleme.json, the old combined files become
+// KareNot/video_notlari_eski*.txt and the old folder is renamed to "Video Notlari (eski)". Nothing is deleted. If a step
+// fails, the old folder stays where it is and the next start tries again (the merge is repeatable).
+
+let migrationMessage = null;   // OSD text, shown when the first video has loaded
+const LOCK = ROOT + "/.tasiniyor";
+
+async function run(cmd, args, quiet) {
+  try {
+    const r = await utils.exec(cmd, args);
+    if (r.status !== 0 && !quiet) log(cmd + " " + args.join(" ") + " failed: " + r.stderr);
+    return r.status === 0;
+  } catch (e) {
+    log(cmd + " error: " + e);
+    return false;
+  }
+}
+
+// Disk content (ignores the write queue); null when missing or unreadable.
+function readDisk(path) {
+  try {
+    if (!file.exists(path)) return null;
+    const s = file.read(path);
+    return s == null ? null : String(s);
+  } catch (e) {
+    log("read failed for " + path + ": " + e);
+    return null;
+  }
+}
+
+// Temp file + rename, then reads the file back; false on any failure.
+async function writeChecked(path, content) {
+  if (!(await ensureDir(dirName(path)))) return false;
+  const tmp = path + ".tmp";
+  try {
+    file.write(tmp, content);
+  } catch (e) {
+    log("write failed for " + tmp + ": " + e);
+    return false;
+  }
+  if (!(await run("/bin/mv", ["-f", tmp, path]))) {
+    try { if (file.exists(tmp)) file.delete(tmp); } catch (e) { /* ignore */ }
+    return false;
+  }
+  const back = readDisk(path);
+  return back != null && back.replace(/^﻿/, "").replace(/\r\n/g, "\n") === content;
+}
+
+// First path make(1), make(2), ... that does not exist yet.
+function freePath(make) {
+  for (let i = 1; i < 1000; i++) {
+    const p = make(i);
+    if (!file.exists(p)) return p;
+  }
+  return null;
+}
+
+// Several IINA windows run this script at once; mkdir without -p is atomic, so the lock folder admits one of them.
+async function takeLock() {
+  if (!(await ensureDir(ROOT))) return false;
+  for (let i = 0; i < 60; i++) {
+    if (await run("/bin/mkdir", [LOCK], true)) {
+      try { file.write(LOCK + "/zaman", String(Date.now())); } catch (e) { /* ignore */ }
+      return true;
+    }
+    const stamp = parseInt(readDisk(LOCK + "/zaman") || "", 10);
+    if (i >= 8 && !(stamp > Date.now() - 60000)) await releaseLock();   // left behind by a crashed window
+    else await sleep(250);
+  }
+  return false;
+}
+
+async function releaseLock() {
+  try { if (file.exists(LOCK + "/zaman")) file.delete(LOCK + "/zaman"); } catch (e) { /* ignore */ }
+  await run("/bin/rmdir", [LOCK], true);
+}
+
+async function migrate() {
+  if (!file.exists(OLD_WORK) && !OLD_COMBINED.some((p) => file.exists(p))) return;
+  if (!(await takeLock())) {
+    migrationMessage = "KareNot: eski notlar şimdi taşınamadı; eski klasör yerinde bırakıldı";
+    return;
+  }
+  let result = "fail";
+  try {
+    result = await migrateLocked();
+  } catch (e) {
+    log("migration error: " + e);
+  }
+  await releaseLock();
+  if (result === "ok") migrationMessage = "KareNot: notlar Masaüstü/KareNot klasörüne taşındı";
+  else if (result === "fail") migrationMessage = "KareNot: eski notlar taşınamadı; eski klasör yerinde bırakıldı";
+  log("migration: " + result);
+}
+
+async function migrateLocked() {
+  const combined = OLD_COMBINED.filter((p) => file.exists(p));
+  if (!file.exists(OLD_WORK) && combined.length === 0) return "none";   // another window did it meanwhile
+  let failed = false;
+
+  // 1. Notes. Per-video files are the source of truth; combined files only add videos without an own file.
+  const old = [];
+  const hasFile = {};
+  for (const e of listDir(OLD_NOTES_DIR)) {
+    if (e.isDir || !/\.txt$/i.test(e.filename)) continue;
+    const text = readDisk(OLD_NOTES_DIR + "/" + e.filename);
+    if (text == null) { failed = true; continue; }
+    for (const n of F.parseNotes(text)) { old.push(n); hasFile[n.video] = true; }
+  }
+  for (const p of combined) {
+    const text = readDisk(p);
+    if (text == null) { failed = true; continue; }
+    for (const n of F.parseNotes(text)) if (!hasFile[n.video]) old.push(n);
+  }
+  const byFile = {};
+  for (const n of old) {
+    const p = notesFileOf(n.video);
+    (byFile[p] = byFile[p] || []).push(n);
+  }
+  for (const p of Object.keys(byFile)) {
+    const current = readDisk(p);
+    if (current == null && file.exists(p)) { failed = true; continue; }
+    const m = F.mergeNotes(F.parseNotes(current), byFile[p]);
+    if (m.added > 0 && !(await writeChecked(p, F.serialize(m.list)))) failed = true;
+  }
+  if (failed) return "fail";
+
+  // 2. Screenshots and clips referenced by the notes (exact name or old VLC prefix). Unreferenced files stay in the
+  // old folder. A file needed by two folders is moved to the first and copied to the second.
+  const oldNames = fileNames(OLD_SS_DIR);
+  const placed = {};
+  for (const n of old) {
+    for (const ref of [n.shot, n.clip]) {
+      const name = F.findShot(ref, oldNames);
+      if (!name) continue;
+      const dir = folderOf(n.video) + "/ss";
+      const target = dir + "/" + name;
+      if (file.exists(target)) continue;
+      if (!(await ensureDir(dir))) { failed = true; continue; }
+      const src = OLD_SS_DIR + "/" + name;
+      if (file.exists(src)) {
+        if ((await run("/bin/mv", ["-n", src, target])) && file.exists(target)) placed[name] = target;
+        else failed = true;
+      } else if (placed[name]) {
+        if (!(await run("/bin/cp", ["-n", placed[name], target])) || !file.exists(target)) failed = true;
+      }
+    }
+  }
+
+  // 3. Review state: entries only in the old file are added, fields missing in the new one filled in.
+  if (file.exists(OLD_REVIEW)) {
+    const oldText = readDisk(OLD_REVIEW);
+    const current = readDisk(REVIEW);
+    if (oldText == null || (current == null && file.exists(REVIEW))) {
+      failed = true;
+    } else {
+      const m = F.mergeReview(F.parseReview(current), F.parseReview(oldText));
+      if (m.changed && !(await writeChecked(REVIEW, JSON.stringify(m.root, null, 2)))) failed = true;
+    }
+  }
+  if (failed) return "fail";
+
+  // 4. Old combined files are kept once as KareNot/video_notlari_eski*.txt.
+  for (const p of combined) {
+    const target = freePath((i) => ROOT + "/video_notlari_eski" + (i === 1 ? "" : "_" + i) + ".txt");
+    if (!target || !(await run("/bin/mv", ["-n", p, target])) || file.exists(p)) failed = true;
+  }
+  if (failed) return "fail";
+
+  // 5. The old folder (with everything not moved: unreferenced shots, old reports, notlar/) is renamed.
+  if (file.exists(OLD_WORK)) {
+    const target = freePath((i) => DESKTOP + "/Video Notlari (eski" + (i === 1 ? "" : " " + i) + ")");
+    if (!target || !(await run("/bin/mv", [OLD_WORK, target])) || file.exists(OLD_WORK)) return "fail";
+  }
+  return "ok";
+}
+
+const migration = migrate().catch((e) => log("migration error: " + e));
+
 // ---------- Events ----------
 
 event.on("iina.window-loaded", () => {
@@ -685,10 +927,12 @@ function onOverlayLoaded() {
 
 event.on("iina.plugin-overlay-loaded", onOverlayLoaded);
 
-event.on("iina.file-loaded", () => {
+event.on("iina.file-loaded", async () => {
   if (video && lastPos != null) savePosition(video, lastPos);
   stopLoop();
   if (areaMode || areaRect) endAreaMode();
+  video = null;          // no notes are written until the old layout has been migrated
+  await migration;
   video = currentVideoName() || null;
   lastPos = null;
   savedPos = null;
@@ -696,6 +940,10 @@ event.on("iina.file-loaded", () => {
   reloadAll();
   pushState();
   tryResume(0);
+  if (migrationMessage) {
+    osd(migrationMessage);
+    migrationMessage = null;
+  }
 });
 
 event.on("iina.window-will-close", () => {
@@ -760,7 +1008,7 @@ sidebar.onMessage("area", () => toggleAreaMode());
 sidebar.onMessage("report", () => writeReport());
 sidebar.onMessage("reviewed", () => markReviewed());
 sidebar.onMessage("loop", () => startLoop());
-sidebar.onMessage("open-folder", () => { try { file.showInFinder(WORK); } catch (e) { log("finder: " + e); } });
+sidebar.onMessage("open-folder", () => showFolder());
 
 // ---------- Overlay messages ----------
 
@@ -805,6 +1053,6 @@ addMenu("Seçili notu döngüye al / bırak", "l", () => startLoop());
 addMenu("Buraya kadar inceledim", "i", () => markReviewed());
 menu.addItem(menu.separator());
 addMenu("Alan işaretle / iptal", null, () => toggleAreaMode());
-addMenu("Raporu kaydet (rapor.md)", null, () => writeReport());
-addMenu("Not klasörünü Finder'da göster", null, () => { try { file.showInFinder(WORK); } catch (e) { log(e); } });
+addMenu("Bu videonun raporunu kaydet (rapor.md)", null, () => writeReport());
+addMenu("Not klasörünü Finder'da göster", null, () => showFolder());
 addMenu("KareNot panelini göster", null, () => sidebar.show());

@@ -15,8 +15,10 @@ sealed partial class MainForm
     partial void RegisterExport()
     {
         exportMenu.ShowItemToolTips = true;
+        exportMenu.Items.Add("Tüm videoların raporu", null, (s, e) => SaveReportOf(null)).ToolTipText =
+            "Bütün videoların notları tek raporda: Masaüstü\\KareNot\\rapor.md ve rapor.html.";
         exportMenu.Items.Add("Notları CSV olarak kaydet", null, (s, e) => ExportCsv()).ToolTipText =
-            "Tüm notlar; Excel için ; ayraçlı, UTF-8. Video Notlari\\cikti klasörüne yazılır.";
+            "Tüm videoların notları; Excel için ; ayraçlı, UTF-8. Masaüstü\\KareNot\\cikti klasörüne yazılır.";
         exportMenu.Items.Add("Görev listesi (agent / ekip için)", null, (s, e) => ExportTaskList()).ToolTipText =
             "Açık oyun testi notları, her biri ayrı görev (Markdown): video, zaman, önem, SS / klip, Beklenen / Gözlenen / Kabul ölçütü.";
         exportMenu.Items.Add("Kurgu notları (JSON, editör/AI için)", null, (s, e) => _ = ExportEditNotes()).ToolTipText =
@@ -102,12 +104,7 @@ sealed partial class MainForm
         return "ffmpeg: " + string.Join(" / ", lines.Skip(Math.Max(0, lines.Count - 2)));
     }
 
-    static string SafeName(string video)
-    {
-        var name = Path.GetFileNameWithoutExtension(video ?? "");
-        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
-        return name.Length > 0 ? name : "video";
-    }
+    static string SafeName(string video) => Paths.FolderName(video);
 
     static void Reveal(string path)
     {
@@ -116,10 +113,11 @@ sealed partial class MainForm
 
     static string Stamp => DateTime.Now.ToString("yyyyMMdd_HHmm", CultureInfo.InvariantCulture);
 
-    string WriteExport(string name, string text, Encoding encoding = null)
+    // Into the video's cikti\, or KareNot\cikti for several videos (video null).
+    string WriteExport(string video, string name, string text, Encoding encoding = null)
     {
-        Directory.CreateDirectory(Paths.ExportDir);
-        var path = Path.Combine(Paths.ExportDir, name);
+        Directory.CreateDirectory(Paths.ExportDir(video));
+        var path = Path.Combine(Paths.ExportDir(video), name);
         File.WriteAllText(path, text, encoding ?? Utf8NoBom);
         return path;
     }
@@ -131,7 +129,7 @@ sealed partial class MainForm
         if (store.All.Count == 0) { SetStatus("Kaydedilecek not yok."); return; }
         try
         {
-            var path = WriteExport($"KareNot_notlar_{Stamp}.csv", Reports.Csv(store.All), Reports.CsvEncoding);
+            var path = WriteExport(null, $"KareNot_notlar_{Stamp}.csv", Reports.Csv(store.All), Reports.CsvEncoding);
             SetStatus($"CSV kaydedildi ({store.All.Count} not): {path}");
             Reveal(path);
         }
@@ -145,8 +143,8 @@ sealed partial class MainForm
         if (notes.Count == 0) { SetStatus(currentVideo != null ? "Bu videoda açık oyun testi notu yok." : "Açık oyun testi notu yok."); return; }
         try
         {
-            var path = WriteExport($"agent_gorevleri_{(currentVideo != null ? SafeName(currentVideo) : "tum")}.md",
-                Reports.TaskList(notes, currentVideo ?? "tüm videolar", "../ss/"));
+            var path = WriteExport(currentVideo, $"agent_gorevleri_{(currentVideo != null ? SafeName(currentVideo) : "tum")}.md",
+                Reports.TaskList(notes, currentVideo ?? "tüm videolar", currentVideo != null ? _ => "../ss/" : v => "../" + Reports.FolderMedia(v)));
             SetStatus($"Görev listesi kaydedildi ({notes.Count} görev): {path}");
             Reveal(path);
         }
@@ -202,8 +200,8 @@ sealed partial class MainForm
             var info = await EditVideoInfo(video, notes);
             ct.ThrowIfCancellationRequested();
             var name = "kurgu_notlari_" + SafeName(video);
-            var json = WriteExport(name + ".json", Reports.EditJson(info));
-            WriteExport(name + ".md", Reports.EditMarkdown(info));
+            var json = WriteExport(video, name + ".json", Reports.EditJson(info));
+            WriteExport(video, name + ".md", Reports.EditMarkdown(info));
             SetStatus("Kurgu notları kaydedildi: " + Path.ChangeExtension(json, null) + " (.json + .md)");
             Reveal(json);
         });
@@ -222,7 +220,7 @@ sealed partial class MainForm
             SetStatus("Kare hızı okunuyor…");
             var fps = await Ffmpeg.FrameRate(path);
             ct.ThrowIfCancellationRequested();
-            var file = WriteExport(SafeName(video) + "_isaretler.edl", Reports.ResolveEdl(notes, fps, Path.GetFileNameWithoutExtension(video)));
+            var file = WriteExport(video, SafeName(video) + "_isaretler.edl", Reports.ResolveEdl(notes, fps, Path.GetFileNameWithoutExtension(video)));
             SetStatus($"Resolve işaretleri kaydedildi ({notes.Count} not, {fps.ToString("0.##", CultureInfo.InvariantCulture)} fps): {file} — " +
                 "Resolve: Timeline > Import > Timeline Markers from EDL");
             Reveal(file);
@@ -239,10 +237,10 @@ sealed partial class MainForm
         if (!NeedFfmpeg()) return;
         var path = player.FilePath;
         var name = string.Format(CultureInfo.InvariantCulture, "{0}_{1:yyyyMMdd_HHmmss}_{2}s_klip.mp4", n.Kind.ToLowerInvariant(), DateTime.Now, (int)n.T);
-        var output = Path.Combine(Paths.ShotsDir, name);
+        var output = Path.Combine(Paths.ShotsDir(n.Video), name);
         _ = RunExportJob("Klip", async ct =>
         {
-            Directory.CreateDirectory(Paths.ShotsDir);
+            Directory.CreateDirectory(Paths.ShotsDir(n.Video));
             SetStatus($"Klip çıkarılıyor: {NoteStore.Fmt(n.T)} (−{settings.ClipBefore:0.#} / +{settings.ClipAfter:0.#} sn)…");
             try
             {
@@ -270,8 +268,8 @@ sealed partial class MainForm
     void OpenSelectedClip()
     {
         var n = SelectedNote;
-        var file = n?.Clip == null ? null : Path.Combine(Paths.ShotsDir, n.Clip);
-        if (file == null || !File.Exists(file)) { SetStatus("Seçili notun klibi yok."); return; }
+        var file = n == null || NoteStore.ResolveClip(n) == null ? null : Path.Combine(Paths.ShotsDir(n.Video), n.Clip);
+        if (file == null) { SetStatus("Seçili notun klibi yok."); return; }
         try { Process.Start(new ProcessStartInfo(file) { UseShellExecute = true }); }
         catch (Exception ex) { SetStatus("HATA: klip açılamadı: " + ex.Message); }
     }
@@ -288,27 +286,31 @@ sealed partial class MainForm
             .Where(n => !dlg.OpenOnly || Reports.IsOpen(n))
             .ToList();
         if (notes.Count == 0) { SetStatus("Seçilen süzgeçle pakete girecek not yok."); return; }
-        var label = dlg.AllVideos || currentVideo == null ? "tum" : SafeName(currentVideo);
-        var zip = Path.Combine(Paths.ExportDir, $"KareNot_{label}_{Stamp}.zip");
+        var scopeVideo = dlg.AllVideos ? null : currentVideo;
+        var zip = Path.Combine(Paths.ExportDir(scopeVideo), $"KareNot_{(scopeVideo == null ? "tum" : SafeName(scopeVideo))}_{Stamp}.zip");
         _ = RunExportJob("Bulgu paketi", ct => MakePackage(notes, zip, dlg.IncludeMedia, ct));
     }
 
-    async Task MakePackage(List<Note> notes, string zipPath, bool media, CancellationToken ct)
+    async Task MakePackage(List<Note> notes, string zipPath, bool includeMedia, CancellationToken ct)
     {
         SetStatus("Bulgu paketi hazırlanıyor…");
+        // Media go to ss/ in the ZIP, into one sub-folder per video folder when there are several.
+        bool several = notes.Select(n => Paths.FolderName(n.Video)).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+        string Sub(string video) => several ? Paths.FolderName(video) + "/" : "";
+        Func<string, string> media = !includeMedia ? null : several ? v => "ss/" + Uri.EscapeDataString(Paths.FolderName(v)) + "/" : _ => "ss/";
         // Without media the reports must not link files that are not in the ZIP.
-        var reportNotes = media ? notes : notes.Select(n => { var c = n.Clone(); c.Shot = null; c.Clip = null; return c; }).ToList();
+        var reportNotes = includeMedia ? notes : notes.Select(n => { var c = n.Clone(); c.Shot = null; c.Clip = null; return c; }).ToList();
         var texts = new List<(string Name, string Text, Encoding Encoding)>
         {
-            ("rapor.md", Reports.Markdown(reportNotes, out _), Utf8NoBom),
-            ("rapor.html", Reports.Html(reportNotes), Utf8NoBom),
+            ("rapor.md", Reports.Markdown(reportNotes, out _, media), Utf8NoBom),
+            ("rapor.html", Reports.Html(reportNotes, media), Utf8NoBom),
             ("notlar.csv", Reports.Csv(notes), Reports.CsvEncoding),
         };
         var game = notes.Where(n => !Kinds.IsEdit(n.Kind)).ToList();
         if (game.Count > 0)
         {
             var videos = game.Select(n => n.Video).Distinct().ToList();
-            texts.Add(("agent_gorevleri.md", Reports.TaskList(game, videos.Count == 1 ? videos[0] : "tüm videolar", media ? "ss/" : null), Utf8NoBom));
+            texts.Add(("agent_gorevleri.md", Reports.TaskList(game, videos.Count == 1 ? videos[0] : "tüm videolar", media), Utf8NoBom));
         }
         foreach (var group in notes.GroupBy(n => n.Video).Where(g => g.Any(n => Kinds.IsEdit(n.Kind))))
         {
@@ -318,12 +320,13 @@ sealed partial class MainForm
             texts.Add((name + ".json", Reports.EditJson(info), Utf8NoBom));
             texts.Add((name + ".md", Reports.EditMarkdown(info), Utf8NoBom));
         }
-        var files = !media ? new List<string>() : notes
-            .SelectMany(n => new[] { NoteStore.ResolveShot(n.Shot), n.Clip != null && File.Exists(Path.Combine(Paths.ShotsDir, n.Clip)) ? n.Clip : null })
-            .Where(f => f != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var files = !includeMedia ? new List<(string Path, string Entry)>() : notes
+            .SelectMany(n => new[] { NoteStore.ResolveShot(n), NoteStore.ResolveClip(n) }.Where(f => f != null)
+                .Select(f => (Path: Path.Combine(Paths.ShotsDir(n.Video), f), Entry: "ss/" + Sub(n.Video) + f)))
+            .DistinctBy(f => f.Entry, StringComparer.OrdinalIgnoreCase).ToList();
 
         var progress = new Progress<int>(i => SetStatus($"Bulgu paketi: {i} / {files.Count} dosya…"));
-        Directory.CreateDirectory(Paths.ExportDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(zipPath));
         try
         {
             await Task.Run(() =>
@@ -340,7 +343,7 @@ sealed partial class MainForm
                 foreach (var f in files)
                 {
                     ct.ThrowIfCancellationRequested();
-                    archive.CreateEntryFromFile(Path.Combine(Paths.ShotsDir, f), "ss/" + f, CompressionLevel.NoCompression);
+                    archive.CreateEntryFromFile(f.Path, f.Entry, CompressionLevel.NoCompression);
                     ((IProgress<int>)progress).Report(++done);
                 }
             }, ct);
@@ -371,14 +374,15 @@ sealed partial class MainForm
         if (!NeedFfmpeg()) return Task.CompletedTask;
         var path = player.FilePath;
         double length = player.LengthMs / 1000.0;
-        var output = Path.Combine(Paths.ExportDir, SafeName(currentVideo) + "_kurgu.mp4");
+        var outputDir = Paths.ExportDir(currentVideo);
+        var output = Path.Combine(outputDir, SafeName(currentVideo) + "_kurgu.mp4");
         return RunExportJob("Kurgu videosu", async ct =>
         {
             SetStatus("Kurgu videosu hazırlanıyor…");
             if (length <= 0) length = await Ffmpeg.Duration(path) ?? 0;
             var hasAudio = await Ffmpeg.HasAudio(path);
             double outLength = Ffmpeg.KeptParts(cuts, length).Sum(k => (k.End ?? length) - k.Start);
-            Directory.CreateDirectory(Paths.ExportDir);
+            Directory.CreateDirectory(outputDir);
             var extra = (hasAudio ? "" : ", videoda ses yok") + (unpaired > 0 ? $", {unpaired} eşsiz kesim işareti atlandı" : "");
             try
             {

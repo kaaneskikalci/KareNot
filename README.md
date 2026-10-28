@@ -66,17 +66,25 @@ kendi sekmesini açar. `F1` kısayol listesini gösterir.
 | Bipli ve kesilmiş video | *Dışa aktar ▾* | Kurgunun hızlı ilk hâli (ffmpeg) |
 | CSV | *Dışa aktar ▾* | Excel, Trello, Jira içe aktarma |
 
-Çıktılar `Masaüstü\Video Notlari\cikti\` klasörüne yazılır.
+Rapor ve çıktılar açık videonun klasörüne (`Masaüstü\KareNot\<video adı>\`, çıktılar `cikti\` altında) yazılır; birden çok
+videoyu kapsayanlar (tüm videoların raporu, CSV, "Tüm videolar" ZIP'i) `Masaüstü\KareNot\` ve `Masaüstü\KareNot\cikti\` içine.
 
 ## Dosyalar
 
+Her video kendi adını taşıyan bir klasörde (uzantısız ad; aynı adlı `.mp4` ve `.mkv` aynı klasörü paylaşır):
+
 | Yer | İçerik |
 |-----|--------|
-| `Masaüstü\Video Notlari\notlar\<video adı>.txt` | Her videonun notları (esas kaynak) |
-| `Masaüstü\video_notlari.txt` | Tüm notlar tek dosyada |
-| `Masaüstü\Video Notlari\ss\` | Ekran görüntüleri ve klipler |
-| `Masaüstü\Video Notlari\inceleme.json` | Kaldığın yer, inceleme durumu, build / testçi |
-| `Masaüstü\Video Notlari\hazir_notlar.txt`, `kufur_listesi.txt` | Düzenlenebilir listeler |
+| `Masaüstü\KareNot\<video adı>\notlar.txt` | Videonun notları (esas kaynak) |
+| `Masaüstü\KareNot\<video adı>\ss\` | Videonun ekran görüntüleri ve klipleri |
+| `Masaüstü\KareNot\<video adı>\rapor.md`, `rapor.html`, `cikti\` | Videonun raporu ve çıktıları |
+| `Masaüstü\KareNot\inceleme.json` | Kaldığın yer, inceleme durumu, build / testçi (tüm videolar) |
+| `Masaüstü\KareNot\hazir_notlar.txt`, `kufur_listesi.txt` | Düzenlenebilir listeler |
+| `Masaüstü\KareNot\rapor.md`, `rapor.html`, `cikti\` | Tüm videoların raporu ve çok videolu çıktılar |
+
+Eski sürümlerin `Masaüstü\Video Notlari\` klasörü (ve `Masaüstü\video_notlari.txt`) ilk açılışta bu düzene taşınır: notlar
+ve SS / klipler videoların klasörlerine, listeler ve `inceleme.json` `KareNot\` içine; eski klasör `Video Notlari (eski)` adıyla
+kalır (eski raporlar ve çıktılar onun içinde). Taşıma kaydı: `Masaüstü\KareNot\tasima_gunlugu.txt`.
 
 Not dosyaları sekmeyle ayrılmış metindir: `saniye  zaman  tür  not  video  ss  durum  önem  bitiş  klip`
 (sondaki boş sütunlar yazılmaz; eski 5–6 sütunlu dosyalar olduğu gibi okunur). IINA eklentisi aynı dosyaları kullanır.
@@ -92,6 +100,7 @@ bir ses kaydıyla denendi. **Henüz denenmedi:**
   video, görev listesi, kurgu notları, CSV, Resolve EDL, Ayarlar penceresi. Bunların ffmpeg / dosya tarafı ayrıca
   denendi, menüden tıklanarak denenmedi. DaVinci Resolve'a EDL içe aktarma da denenmedi.
 - %100'den büyük ekran ölçeklemesi.
+- Eski `Video Notlari` klasörünün taşınması gerçek verilerle (yalnız otomatik testte hazırlanan örnekle denendi).
 
 ## Kaynaktan derleme
 
