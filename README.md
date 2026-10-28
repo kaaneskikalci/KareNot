@@ -81,6 +81,18 @@ kendi sekmesini açar. `F1` kısayol listesini gösterir.
 Not dosyaları sekmeyle ayrılmış metindir: `saniye  zaman  tür  not  video  ss  durum  önem  bitiş  klip`
 (sondaki boş sütunlar yazılmaz; eski 5–6 sütunlu dosyalar olduğu gibi okunur). IINA eklentisi aynı dosyaları kullanır.
 
+## Test durumu
+
+Otomatik test (`--selftest`) oynatıcıyı, not alma ve alan işaretlemeyi, sekmeleri, kesim aralıklarını, geri al / yinele,
+durum / önem / filtre / aramayı, dosya biçimini ve raporları kapsar; v1.2 ile geçti. Whisper ile küfür adayı bulma gerçek
+bir ses kaydıyla denendi. **Henüz denenmedi:**
+
+- IINA eklentisi (Mac'te hiç çalıştırılmadı).
+- *Dışa aktar ▾* ve *Araçlar ▾* işlemlerinin uygulama içinden kullanımı: bulgu paketi (ZIP), klip çıkarma, bipli ve kesilmiş
+  video, görev listesi, kurgu notları, CSV, Resolve EDL, Ayarlar penceresi. Bunların ffmpeg / dosya tarafı ayrıca
+  denendi, menüden tıklanarak denenmedi. DaVinci Resolve'a EDL içe aktarma da denenmedi.
+- %100'den büyük ekran ölçeklemesi.
+
 ## Kaynaktan derleme
 
 .NET 10 SDK ile:
