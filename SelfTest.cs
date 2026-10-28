@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace VideoNotlari;
+namespace KareNot;
 
 // "--selftest <log> <video>": drives the real window and player through the main features and logs the results.
 sealed partial class MainForm
@@ -118,7 +118,13 @@ sealed partial class MainForm
 
             player.Seek(5000);
             await Wait(700);
+            noteBox.Text = "taslak";
+            ActiveControl = null;
             AddNote("BIP", false);
+            var firstBip = store.All.LastOrDefault(n => n.Video == currentVideo && n.Kind == "BIP");
+            Check(tab == PanelTab.Edit && editPage.Visible && !gamePage.Visible, "editing mark opens the Kurgu tab");
+            Check(firstBip?.Text == "" && noteBox.Text == "taslak", "editing mark keeps the game note draft");
+            noteBox.Clear();
             AddNote("KES_BASLA", false);
             player.Seek(7000);
             await Wait(700);
@@ -132,13 +138,18 @@ sealed partial class MainForm
             var kinds = CurrentNotes().Select(n => n.Kind).ToList();
             Check(kinds.Count == 6, "6 notes in list: " + string.Join(",", kinds));
             Check(store.All.Where(n => n.Kind is "BIP" or "KES_BASLA" or "KES_BITIR").All(n => n.Shot == null), "no screenshot for BIP/KES");
-            Check(list.Items.Count == 6 && seek.Markers.Count == 6, "list rows and timeline markers");
+            Check(tab == PanelTab.Game && gameList.Items.Count == 3 && editList.Items.Count == 3, "game and editing notes in separate lists");
+            Check(seek.Markers.Count == 3, "timeline shows the game tab's markers");
+            ShowTab(PanelTab.Edit);
+            Check(seek.Markers.Count == 3 && editList.Columns.Count == 3, "timeline shows the Kurgu tab's markers");
+            await Wait(300);
+            CaptureWindow(Path.ChangeExtension(logPath, ".kurgu.png"));
 
             // Screenshot to the selected note, go to, delete last.
-            var bip = list.Items.Cast<ListViewItem>().First(i => ((Note)i.Tag).Kind == "BIP");
+            var bip = editList.Items.Cast<ListViewItem>().First(i => ((Note)i.Tag).Kind == "BIP");
             bip.Selected = true;
             ShotToSelected();
-            Check(((Note)bip.Tag).Shot != null, "screenshot added to selected BIP");
+            Check(((Note)bip.Tag).Shot == null, "no screenshot for a selected editing mark");
             GotoSelected();
             await Wait(800);
             Check(Math.Abs(player.TimeMs - 3000) < 500, "go to selected (-2 s) -> " + player.TimeMs);
@@ -186,14 +197,20 @@ sealed partial class MainForm
             await Wait(2500);
             Info("after next video: " + currentVideo + " state " + player.State);
             Check(currentVideo != Path.GetFileName(video) && player.HasVideo, "next video in folder plays");
-            Check(list.Items.Count == 0, "list shows only the open video's notes");
+            Check(gameList.Items.Count == 0 && editList.Items.Count == 0, "lists show only the open video's notes");
             player.Pause();
             await Wait(500);
             Check(player.TakeSnapshot(Path.Combine(Paths.ShotsDir, "ikinci_video.png"), out var err2), "screenshot of second video " + err2);
 
             TogglePanel();
             Check(split.Panel2Collapsed, "panel hides");
-            TogglePanel();
+            ShowHelp();
+            Check(!split.Panel2Collapsed && tab == PanelTab.Shortcuts && shortcutsPage.Visible && !gamePage.Visible && !editPage.Visible, "help opens panel on shortcuts tab");
+            await Wait(300);
+            CaptureWindow(Path.ChangeExtension(logPath, ".kisayollar.png"));
+            FocusNoteBox();
+            Check(tab == PanelTab.Game && gamePage.Visible && noteBox.Focused, "typing switches to the game tab");
+            ActiveControl = null;
             ToggleFullscreen();
             await Wait(800);
             Check(FormBorderStyle == FormBorderStyle.None && WindowState == FormWindowState.Maximized && !split.Panel2Collapsed, "fullscreen keeps panel");

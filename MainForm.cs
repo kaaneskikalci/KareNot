@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Globalization;
 
-namespace VideoNotlari;
+namespace KareNot;
 
 sealed partial class MainForm : Form
 {
@@ -25,7 +25,7 @@ sealed partial class MainForm : Form
     readonly Label hint = new()
     {
         Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.Gray, BackColor = Color.Black,
-        Font = new Font("Segoe UI", 13f), Text = "Video aç (Ctrl+O) ya da videoyu buraya sürükle-bırak",
+        Font = new Font("Segoe UI", 13f), Text = "Video aç (Ctrl+O) ya da videoyu buraya sürükle-bırak\n\nKısayollar: F1",
     };
     readonly SeekBar seek = new() { Dock = DockStyle.Top };
     readonly Label timeLabel = new() { AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Consolas", 10.5f), Margin = new Padding(8, 7, 8, 0) };
@@ -35,13 +35,16 @@ sealed partial class MainForm : Form
     readonly TextBox noteBox = new() { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 10.5f), BackColor = Color.FromArgb(50, 50, 52), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
     readonly CheckBox shotCheck = new() { Text = "SS ekle", Checked = true, AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(3, 6, 10, 0) };
     readonly Label regionLabel = new() { AutoSize = true, ForeColor = Color.Silver, Margin = new Padding(3, 6, 3, 0), Text = "Alan seçmek için videoda sürükle" };
-    readonly ListView list = new()
-    {
-        Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false,
-        BackColor = Color.FromArgb(28, 28, 30), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.None,
-        Font = new Font("Segoe UI", 9.5f), HeaderStyle = ColumnHeaderStyle.Nonclickable,
-    };
-    readonly Label status = new() { Dock = DockStyle.Fill, ForeColor = Color.Silver, AutoSize = false, Height = 40, Padding = new Padding(2) };
+    readonly ListView gameList = NoteList(), editList = NoteList();
+    readonly Label status = new() { Dock = DockStyle.Bottom, ForeColor = Color.Silver, AutoSize = false, Height = 44, Padding = new Padding(2, 6, 2, 2) };
+
+    // Side panel tabs: game test notes, video editing marks and the shortcut reference.
+    enum PanelTab { Game, Edit, Shortcuts }
+    readonly TableLayoutPanel gamePage = NotePage(), editPage = NotePage();
+    readonly Panel shortcutsPage = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = PanelBack, Visible = false };
+    readonly Dictionary<PanelTab, FlatButton> tabButtons = new();
+    PanelTab tab = PanelTab.Game;
+    PanelTab noteTab = PanelTab.Game;   // last notes tab; picks the list and timeline markers while the shortcuts show
 
     // State
     string currentVideo;
@@ -57,7 +60,7 @@ sealed partial class MainForm : Form
     public MainForm(string startVideo)
     {
         this.startVideo = startVideo;
-        Text = "Video Notları";
+        Text = "KareNot";
         Size = new Size(1500, 860);
         MinimumSize = new Size(900, 500);
         StartPosition = FormStartPosition.CenterScreen;
@@ -93,56 +96,72 @@ sealed partial class MainForm : Form
         videoPanel.MouseDoubleClick += (s, e) => ToggleFullscreen();
         hint.MouseDoubleClick += (s, e) => OpenDialog();
 
-        // Side panel
-        var side = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = PanelBack };
-        side.RowStyles.Clear();
-        void AddRow(Control c, SizeType type = SizeType.AutoSize, float height = 0)
-        {
-            side.RowStyles.Add(new RowStyle(type, height));
-            side.Controls.Add(c, 0, side.RowStyles.Count - 1);
-        }
-
-        AddRow(new Label { Text = "Notu yaz, sonra türünü seç (o anki süreye kaydedilir):", AutoSize = true, ForeColor = Color.Silver, Margin = new Padding(3, 0, 3, 3) });
+        // Side panel: game test page
+        AddRow(gamePage, new Label { Text = "Notu yaz, sonra türünü seç (o anki süreye kaydedilir):", AutoSize = true, ForeColor = Color.Silver, Margin = new Padding(3, 0, 3, 3) });
         noteBox.Margin = new Padding(3, 0, 3, 3);
-        AddRow(noteBox);
-        AddRow(Flow(shotCheck, regionLabel));
-        AddRow(Flow(
+        AddRow(gamePage, noteBox);
+        AddRow(gamePage, Flow(shotCheck, regionLabel));
+        AddRow(gamePage, Flow(
             Btn("BUG  [B]", () => AddNote("BUG", false), Kinds.Color("BUG")),
             Btn("DEĞİŞİKLİK  [D]", () => AddNote("DEGISIKLIK", false), Kinds.Color("DEGISIKLIK")),
             Btn("NOT  [N]", () => AddNote("NOT", true), Kinds.Color("NOT"))));
-        AddRow(Flow(
+        AddRow(gamePage, Flow(Btn("Seçilene SS ekle  [S]", ShotToSelected)));
+        gameList.Columns.Add("Zaman", 82);
+        gameList.Columns.Add("Tür", 100);
+        gameList.Columns.Add("SS", 34);
+        gameList.Columns.Add("Not", 200);
+        var gameMenu = new ContextMenuStrip();
+        gameMenu.Items.Add("Git (-2 sn)", null, (s, e) => GotoSelected());
+        gameMenu.Items.Add("Düzenle (F2)", null, (s, e) => EditSelected());
+        gameMenu.Items.Add("SS'i aç", null, (s, e) => OpenSelectedShot());
+        gameMenu.Items.Add("Seçilene SS ekle (S)", null, (s, e) => ShotToSelected());
+        gameMenu.Items.Add(new ToolStripSeparator());
+        gameMenu.Items.Add("Sil (Del)", null, (s, e) => DeleteSelected());
+        gameList.ContextMenuStrip = gameMenu;
+        AddRow(gamePage, gameList, SizeType.Percent, 100);
+        AddRow(gamePage, ListButtons());
+
+        // Side panel: video editing page (no text box, no screenshots)
+        AddRow(editPage, new Label { Text = "Kurgu işaretleri o anki süreye kaydedilir:", AutoSize = true, ForeColor = Color.Silver, Margin = new Padding(3, 0, 3, 3) });
+        AddRow(editPage, Flow(
             Btn("BİP (küfür)  [K]", () => AddNote("BIP", false), Kinds.Color("BIP")),
             Btn("Kesim BAŞLA  [1]", () => AddNote("KES_BASLA", false), Kinds.Color("KES_BASLA")),
             Btn("Kesim BİTİR  [2]", () => AddNote("KES_BITIR", false), Kinds.Color("KES_BITIR"))));
-        AddRow(Flow(Btn("Seçilene SS ekle  [S]", ShotToSelected)));
+        editList.Columns.Add("Zaman", 82);
+        editList.Columns.Add("Tür", 100);
+        editList.Columns.Add("Not", 200);
+        var editMenu = new ContextMenuStrip();
+        editMenu.Items.Add("Git (-2 sn)", null, (s, e) => GotoSelected());
+        editMenu.Items.Add("Düzenle (F2)", null, (s, e) => EditSelected());
+        editMenu.Items.Add(new ToolStripSeparator());
+        editMenu.Items.Add("Sil (Del)", null, (s, e) => DeleteSelected());
+        editList.ContextMenuStrip = editMenu;
+        AddRow(editPage, editList, SizeType.Percent, 100);
+        AddRow(editPage, ListButtons());
 
-        list.Columns.Add("Zaman", 82);
-        list.Columns.Add("Tür", 100);
-        list.Columns.Add("SS", 34);
-        list.Columns.Add("Not", 200);
-        list.Margin = new Padding(3, 6, 3, 3);
-        list.DoubleClick += (s, e) => GotoSelected();
-        list.Resize += (s, e) => FitNoteColumn();
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Git (-2 sn)", null, (s, e) => GotoSelected());
-        menu.Items.Add("Düzenle (F2)", null, (s, e) => EditSelected());
-        menu.Items.Add("SS'i aç", null, (s, e) => OpenSelectedShot());
-        menu.Items.Add("Seçilene SS ekle (S)", null, (s, e) => ShotToSelected());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Sil (Del)", null, (s, e) => DeleteSelected());
-        list.ContextMenuStrip = menu;
-        AddRow(list, SizeType.Percent, 100);
+        foreach (var l in new[] { gameList, editList })
+        {
+            l.DoubleClick += (s, e) => GotoSelected();
+            l.Resize += (s, e) => FitNoteColumn((ListView)s);
+        }
 
-        AddRow(Flow(
-            Btn("Git (-2 sn)  [G]", GotoSelected),
-            Btn("Düzenle  [F2]", EditSelected),
-            Btn("Seçileni sil  [Del]", DeleteSelected),
-            Btn("Son notu sil  [Ctrl+Z]", DeleteLast)));
-        AddRow(Flow(
-            Btn("Raporu kaydet  [Ctrl+S]", SaveReport),
-            Btn("Klasörü aç", OpenFolder)));
-        AddRow(status, SizeType.Absolute, 44);
-        split.Panel2.Controls.Add(side);
+        // Fill pages first so the docked tab strip, footer and status line are laid out around them.
+        BuildShortcutsPage();
+        tabButtons[PanelTab.Game] = Btn("Oyun testi", () => ShowTab(PanelTab.Game));
+        tabButtons[PanelTab.Edit] = Btn("Kurgu", () => ShowTab(PanelTab.Edit));
+        tabButtons[PanelTab.Shortcuts] = Btn("Kısayollar  [F1]", () => ShowTab(PanelTab.Shortcuts));
+        var tabs = Flow(tabButtons.Values.ToArray());
+        tabs.Dock = DockStyle.Top;
+        tabs.Padding = new Padding(0, 0, 0, 6);
+        var footer = Flow(Btn("Raporu kaydet  [Ctrl+S]", SaveReport), Btn("Klasörü aç", OpenFolder));
+        footer.Dock = DockStyle.Bottom;
+        split.Panel2.Controls.Add(gamePage);
+        split.Panel2.Controls.Add(editPage);
+        split.Panel2.Controls.Add(shortcutsPage);
+        split.Panel2.Controls.Add(tabs);
+        split.Panel2.Controls.Add(footer);
+        split.Panel2.Controls.Add(status);
+        ShowTab(PanelTab.Game);
 
         // Bottom bar
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Back };
@@ -209,18 +228,40 @@ sealed partial class MainForm : Form
         return b;
     }
 
+    static TableLayoutPanel NotePage() => new() { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = PanelBack, Visible = false };
+
+    static ListView NoteList() => new()
+    {
+        Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false,
+        BackColor = Color.FromArgb(28, 28, 30), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.None,
+        Font = new Font("Segoe UI", 9.5f), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3, 6, 3, 3),
+    };
+
+    static void AddRow(TableLayoutPanel page, Control c, SizeType type = SizeType.AutoSize, float height = 0)
+    {
+        page.RowStyles.Add(new RowStyle(type, height));
+        page.Controls.Add(c, 0, page.RowStyles.Count - 1);
+    }
+
+    FlowLayoutPanel ListButtons() => Flow(
+        Btn("Git (-2 sn)  [G]", GotoSelected),
+        Btn("Düzenle  [F2]", EditSelected),
+        Btn("Seçileni sil  [Del]", DeleteSelected),
+        Btn("Son notu sil  [Ctrl+Z]", DeleteLast));
+
     protected override void OnShown(EventArgs e)
     {
         LayoutPanel();
         Resize += (s, ev) => { if (!panelLaidOut) LayoutPanel(); };
-        FitNoteColumn();
+        FitNoteColumn(gameList);
+        FitNoteColumn(editList);
         try
         {
             player = new VlcPlayer(videoPanel.Handle);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Video Notları", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "KareNot", MessageBoxButtons.OK, MessageBoxIcon.Error);
             Close();
             return;
         }
@@ -270,7 +311,7 @@ sealed partial class MainForm : Form
         player.SetRate(Rates[rateIndex]);
         currentVideo = Path.GetFileName(path);
         hint.Visible = false;
-        Text = "Video Notları — " + currentVideo;
+        Text = "KareNot — " + currentVideo;
         SaveSetting("son_klasor.txt", Path.GetDirectoryName(path));
         lastAdded = null;
         RefreshList();
@@ -352,7 +393,7 @@ sealed partial class MainForm : Form
     {
         split.Panel2Collapsed = !split.Panel2Collapsed;
         panelButton.Text = split.Panel2Collapsed ? "Paneli göster  [Tab]" : "Paneli gizle  [Tab]";
-        if (split.Panel2Collapsed && (noteBox.Focused || list.Focused)) ActiveControl = null;
+        if (split.Panel2Collapsed && (noteBox.Focused || ListFocused)) ActiveControl = null;
     }
 
     // ---------- Area selection on the video ----------
@@ -399,7 +440,7 @@ sealed partial class MainForm : Form
         regionLabel.Text = "Alan seçili (Esc: iptal)";
         regionLabel.ForeColor = Color.FromArgb(255, 90, 90);
         SetStatus("Alan seçildi: notu yaz ve türünü seç. SS'te kırmızı çerçeveyle işaretlenir.");
-        if (!split.Panel2Collapsed) noteBox.Focus();
+        if (!split.Panel2Collapsed) FocusNoteBox();
     }
 
     void UpdateSelection(Point a, Point b)
@@ -414,7 +455,7 @@ sealed partial class MainForm : Form
     bool FreezeFrame()
     {
         player.Pause();
-        var temp = Path.Combine(Path.GetTempPath(), "videonotlari_kare.png");
+        var temp = Path.Combine(Path.GetTempPath(), "karenot_kare.png");
         if (!player.TakeSnapshot(temp, out var error))
         {
             SetStatus("Alan seçilemedi: " + error);
@@ -475,13 +516,13 @@ sealed partial class MainForm : Form
             SetStatus("Önce bir video aç.");
             return;
         }
-        var text = NoteStore.Clean(noteBox.Text);
+        // Editing marks only take the text box when it is being typed in, so a game note draft is not swallowed.
+        bool useBox = !Kinds.IsEdit(kind) || Typing;
+        var text = useBox ? NoteStore.Clean(noteBox.Text) : "";
         if (requireText && text.Length == 0)
         {
             SetStatus("NOT için önce kutuya yaz (Enter), sonra N / Enter.");
-            if (split.Panel2Collapsed) TogglePanel();
-            player.Pause();
-            noteBox.Focus();
+            FocusNoteBox();
             return;
         }
 
@@ -490,16 +531,19 @@ sealed partial class MainForm : Form
         if (KindTakesShot(kind) && (shotCheck.Checked || RegionActive)) shot = MakeShot(kind, t, out shotError);
 
         lastAdded = store.Add(t, kind, text, currentVideo, shot);
-        noteBox.Clear();
+        if (useBox) noteBox.Clear();
         ClearRegion();
         if (noteBox.Focused) ActiveControl = null;
+        ShowTab(Kinds.IsEdit(kind) ? PanelTab.Edit : PanelTab.Game);
         RefreshList(lastAdded);
         SetStatus(shotError != null
             ? "Not kaydedildi, SS yok: " + shotError
             : $"{Kinds.Label(kind)} eklendi — {NoteStore.Fmt(t)}{(shot != null ? " (SS)" : "")}");
     }
 
-    Note SelectedNote => list.SelectedItems.Count > 0 ? list.SelectedItems[0].Tag as Note : null;
+    ListView ActiveList => noteTab == PanelTab.Edit ? editList : gameList;
+    bool ListFocused => gameList.Focused || editList.Focused;
+    Note SelectedNote => ActiveList.SelectedItems.Count > 0 ? ActiveList.SelectedItems[0].Tag as Note : null;
 
     void ShotToSelected()
     {
@@ -507,6 +551,11 @@ sealed partial class MainForm : Form
         if (n == null)
         {
             SetStatus("Önce listeden bir not seç (istersen 'Git' ile o kareye git).");
+            return;
+        }
+        if (Kinds.IsEdit(n.Kind))
+        {
+            SetStatus("Kurgu işaretlerine SS eklenmez.");
             return;
         }
         if (player == null || !player.HasMedia) return;
@@ -565,6 +614,7 @@ sealed partial class MainForm : Form
             SetStatus("Silmek için listeden bir not seç.");
             return;
         }
+        var list = ActiveList;
         int index = list.SelectedIndices[0];
         store.Remove(n);
         if (n == lastAdded) lastAdded = null;
@@ -573,15 +623,16 @@ sealed partial class MainForm : Form
         SetStatus("Not silindi: " + NoteStore.Fmt(n.T) + " " + Kinds.Label(n.Kind));
     }
 
-    // Removes the note added last in this session; otherwise the one closest to the current position.
+    // Removes the note added last in this session; otherwise the one of the open tab closest to the current position.
     void DeleteLast()
     {
         var notes = CurrentNotes();
         var n = lastAdded != null && notes.Contains(lastAdded) ? lastAdded : null;
-        if (n == null && notes.Count > 0 && player != null)
+        var tabNotes = notes.Where(InNoteTab).ToList();
+        if (n == null && tabNotes.Count > 0 && player != null)
         {
             double t = player.TimeMs / 1000.0;
-            n = notes.OrderBy(x => Math.Abs(x.T - t)).First();
+            n = tabNotes.OrderBy(x => Math.Abs(x.T - t)).First();
         }
         if (n == null) return;
         store.Remove(n);
@@ -592,9 +643,24 @@ sealed partial class MainForm : Form
 
     List<Note> CurrentNotes() => currentVideo == null ? new List<Note>() : store.All.Where(n => n.Video == currentVideo).OrderBy(n => n.T).ToList();
 
+    bool InNoteTab(Note n) => Kinds.IsEdit(n.Kind) == (noteTab == PanelTab.Edit);
+
     void RefreshList(Note select = null)
     {
         var notes = CurrentNotes();
+        FillList(gameList, notes.Where(n => !Kinds.IsEdit(n.Kind)), select, true);
+        FillList(editList, notes.Where(n => Kinds.IsEdit(n.Kind)), select, false);
+        RefreshMarkers();
+
+        if (currentVideo == null)
+            SetStatus($"Toplam {store.All.Count} not. Not dosyası: {Paths.CombinedFile}");
+        else
+            SetStatus($"{notes.Count(n => !Kinds.IsEdit(n.Kind))} not ({notes.Count(n => n.Kind == "BUG")} bug, {notes.Count(n => n.Kind == "DEGISIKLIK")} değişiklik) · " +
+                $"kurgu: {notes.Count(n => n.Kind == "BIP")} bip, {notes.Count(n => n.Kind == "KES_BASLA")} kesim — bu video");
+    }
+
+    static void FillList(ListView list, IEnumerable<Note> notes, Note select, bool withShot)
+    {
         list.BeginUpdate();
         list.Items.Clear();
         foreach (var n in notes)
@@ -603,7 +669,7 @@ sealed partial class MainForm : Form
             var kind = item.SubItems.Add(Kinds.Label(n.Kind));
             kind.ForeColor = ControlPaint.Light(Kinds.Color(n.Kind), 0.5f);
             kind.Font = new Font(list.Font, FontStyle.Bold);
-            item.SubItems.Add(n.Shot != null ? "SS" : "");
+            if (withShot) item.SubItems.Add(n.Shot != null ? "SS" : "");
             item.SubItems.Add(n.Text);
             list.Items.Add(item);
             if (n == select)
@@ -613,15 +679,14 @@ sealed partial class MainForm : Form
             }
         }
         list.EndUpdate();
+    }
 
+    // The timeline shows the marks of the open notes tab only.
+    void RefreshMarkers()
+    {
         seek.Markers.Clear();
-        foreach (var n in notes) seek.Markers.Add(((long)(n.T * 1000), Kinds.Color(n.Kind)));
+        foreach (var n in CurrentNotes().Where(InNoteTab)) seek.Markers.Add(((long)(n.T * 1000), Kinds.Color(n.Kind)));
         seek.Invalidate();
-
-        if (currentVideo == null)
-            SetStatus($"Toplam {store.All.Count} not. Not dosyası: {Paths.CombinedFile}");
-        else
-            SetStatus($"{notes.Count} not ({notes.Count(n => n.Kind == "BUG")} bug, {notes.Count(n => n.Kind == "DEGISIKLIK")} değişiklik) — bu video");
     }
 
     bool panelLaidOut;
@@ -635,10 +700,11 @@ sealed partial class MainForm : Form
         panelLaidOut = true;
     }
 
-    void FitNoteColumn()
+    static void FitNoteColumn(ListView list)
     {
-        int used = list.Columns[0].Width + list.Columns[1].Width + list.Columns[2].Width;
-        list.Columns[3].Width = Math.Max(120, list.ClientSize.Width - used - 4);
+        int last = list.Columns.Count - 1, used = 0;
+        for (int i = 0; i < last; i++) used += list.Columns[i].Width;
+        list.Columns[last].Width = Math.Max(120, list.ClientSize.Width - used - 4);
     }
 
     void SaveReport()
@@ -662,22 +728,148 @@ sealed partial class MainForm : Form
 
     void SetStatus(string text) => status.Text = text;
 
+    // ---------- Side panel tabs ----------
+
+    static readonly (string Title, (string Keys, string Action)[] Rows)[] ShortcutGroups =
+    {
+        ("OYNATICI", new[]
+        {
+            ("Boşluk", "Oynat / durdur"),
+            ("← / →", "3 sn geri / ileri"),
+            ("Shift + ← / →", "10 sn geri / ileri"),
+            (", / .", "Bir kare geri / ileri"),
+            ("- / +", "Hız (0.25x – 3x)"),
+            ("↑ / ↓", "Ses (videoda fare tekerleği de olur)"),
+            ("Page Up / Down", "Klasördeki önceki / sonraki video"),
+            ("F, F11", "Tam ekran (videoya çift tık da olur)"),
+            ("Esc", "Tam ekrandan çık"),
+            ("Tab", "Not panelini aç / kapat"),
+            ("Ctrl+O", "Video aç (sürükle-bırak da olur)"),
+        }),
+        ("OYUN TESTİ (yazı kutusu dışındayken)", new[]
+        {
+            ("B", "BUG"),
+            ("D", "DEĞİŞİKLİK"),
+            ("N", "NOT (önce kutuya yazılmalı)"),
+            ("S", "Seçili nota o anki kareyi SS ekle"),
+            ("Enter", "Videoyu durdur, yazı kutusuna geç"),
+            ("Videoda sürükle", "Video durur, alan kırmızı çerçeveyle işaretlenir; notu yaz ve türünü seç"),
+            ("Esc", "Alan seçimini iptal et"),
+        }),
+        ("YAZI KUTUSUNDAYKEN", new[]
+        {
+            ("Enter", "NOT olarak ekle"),
+            ("Ctrl+B", "BUG olarak ekle"),
+            ("Ctrl+D", "DEĞİŞİKLİK olarak ekle"),
+            ("Ctrl+K", "Yazıyla birlikte BİP ekle"),
+            ("Esc", "Kutudan çık"),
+        }),
+        ("KURGU", new[]
+        {
+            ("K", "BİP (küfür)"),
+            ("1", "Kesim BAŞLA"),
+            ("2", "Kesim BİTİR"),
+        }),
+        ("LİSTE (açık sekmenin listesi)", new[]
+        {
+            ("Çift tık, G", "Seçili nota git (2 sn önce)"),
+            ("F2", "Düzenle (tür + yazı)"),
+            ("Del", "Seçileni sil (seçim yoksa son notu)"),
+            ("Ctrl+Z", "Son eklenen notu sil"),
+            ("Sağ tık", "Menü (SS'i aç, düzenle, sil)"),
+        }),
+        ("SEKMELER", new[]
+        {
+            ("F1", "Kısayollar sekmesini aç / kapat"),
+            ("Hepsi", "Kısayollar her sekmede çalışır; eklenen not kendi sekmesini açar"),
+        }),
+        ("RAPOR", new[]
+        {
+            ("Ctrl+S", "Markdown raporu kaydet (Masaüstü\\Video Notlari\\rapor.md)"),
+        }),
+    };
+
+    void BuildShortcutsPage()
+    {
+        var table = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, BackColor = PanelBack };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var keyFont = new Font("Segoe UI Semibold", 9.5f);
+        var keyColor = Color.FromArgb(156, 220, 254);
+        var keyLabels = new List<Label>();
+        var actionLabels = new List<Label>();
+        int row = 0;
+        foreach (var (title, rows) in ShortcutGroups)
+        {
+            var header = new Label
+            {
+                Text = title, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Margin = new Padding(3, row == 0 ? 2 : 14, 3, 4),
+            };
+            table.Controls.Add(header, 0, row);
+            table.SetColumnSpan(header, 2);
+            row++;
+            foreach (var (keys, action) in rows)
+            {
+                var key = new Label { Text = keys, AutoSize = true, ForeColor = keyColor, Font = keyFont, Margin = new Padding(3, 2, 14, 2) };
+                var text = new Label { Text = action, AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(3, 3, 3, 2) };
+                table.Controls.Add(key, 0, row);
+                table.Controls.Add(text, 1, row);
+                keyLabels.Add(key);
+                actionLabels.Add(text);
+                row++;
+            }
+        }
+        shortcutsPage.Controls.Add(table);
+
+        // AutoSize labels only wrap with a maximum width; keep it in step with the panel width.
+        void WrapActions()
+        {
+            int keyWidth = keyLabels.Max(l => l.PreferredWidth + l.Margin.Horizontal);
+            int width = Math.Max(80, shortcutsPage.ClientSize.Width - keyWidth - SystemInformation.VerticalScrollBarWidth - 10);
+            foreach (var l in actionLabels) l.MaximumSize = new Size(width, 0);
+        }
+        shortcutsPage.Resize += (s, e) => WrapActions();
+        WrapActions();
+    }
+
+    // Switches the side panel page; does not open a hidden panel.
+    void ShowTab(PanelTab show)
+    {
+        if (show != tab && (noteBox.Focused || ListFocused)) ActiveControl = null;
+        tab = show;
+        if (show != PanelTab.Shortcuts && show != noteTab)
+        {
+            noteTab = show;
+            RefreshMarkers();
+        }
+        gamePage.Visible = show == PanelTab.Game;
+        editPage.Visible = show == PanelTab.Edit;
+        shortcutsPage.Visible = show == PanelTab.Shortcuts;
+        foreach (var (key, button) in tabButtons) StyleTab(button, key == show);
+    }
+
+    static void StyleTab(FlatButton tab, bool active)
+    {
+        tab.BackColor = active ? Color.FromArgb(70, 70, 74) : Color.FromArgb(45, 45, 48);
+        tab.FlatAppearance.BorderColor = active ? Color.Gainsboro : Color.FromArgb(90, 90, 90);
+        tab.ForeColor = active ? Color.White : Color.Silver;
+    }
+
+    // "?" button and F1: show the shortcuts tab, or go back to the notes if it is already showing.
     void ShowHelp()
     {
-        MessageBox.Show(this,
-            "OYNATICI\n" +
-            "Boşluk: oynat / durdur\n← / →: 3 sn geri / ileri (Shift: 10 sn)\n, / . : bir kare geri / ileri\n" +
-            "- / + : hız\n↑ / ↓ veya fare tekerleği (videoda): ses\nPage Up / Page Down: klasördeki önceki / sonraki video\n" +
-            "F veya F11: tam ekran (Esc: çık)\nTab: not panelini aç / kapat\nCtrl+O: video aç (sürükle-bırak da olur)\n\n" +
-            "NOTLAR (yazı kutusu dışındayken)\n" +
-            "B: BUG   D: DEĞİŞİKLİK   N: NOT   K: BİP (küfür)\n1: Kesim BAŞLA   2: Kesim BİTİR\nS: seçili nota SS ekle   G: seçili nota git (-2 sn)\n" +
-            "Enter: videoyu durdur ve yazı kutusuna geç\n\n" +
-            "YAZI KUTUSUNDAYKEN\n" +
-            "Enter: NOT olarak ekle   Ctrl+B: BUG   Ctrl+D: DEĞİŞİKLİK\nEsc: kutudan çık\n\n" +
-            "LİSTE\nÇift tık: o ana git (-2 sn)   F2: düzenle   Del: seçileni sil   Ctrl+Z: son notu sil\nSağ tık: SS'i aç\n\n" +
-            "ALAN SEÇME\nVideoda fareyle sürükle: video durur, alan kırmızı çerçeveyle işaretlenir.\nSonra notu yaz ve türünü seç; SS tam kare + kırmızı çerçeve olarak kaydedilir.\n\n" +
-            "Ctrl+S: Markdown raporu kaydet (Masaüstü\\Video Notlari\\rapor.md)",
-            "Kısayollar", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        bool show = split.Panel2Collapsed || tab != PanelTab.Shortcuts;
+        if (split.Panel2Collapsed) TogglePanel();
+        ShowTab(show ? PanelTab.Shortcuts : noteTab);
+    }
+
+    void FocusNoteBox()
+    {
+        if (split.Panel2Collapsed) TogglePanel();
+        ShowTab(PanelTab.Game);
+        player?.Pause();
+        noteBox.Focus();
     }
 
     // ---------- Keyboard ----------
@@ -696,9 +888,10 @@ sealed partial class MainForm : Form
             case Keys.Control | Keys.K: AddNote("BIP", false); return true;
             case Keys.Tab: TogglePanel(); return true;
             case Keys.F11: ToggleFullscreen(); return true;
+            case Keys.F1: ShowHelp(); return true;
             case Keys.Escape:
                 if (RegionActive) { ClearRegion(); SetStatus("Alan seçimi iptal."); }
-                else if (Typing || list.Focused) ActiveControl = null;
+                else if (Typing || ListFocused) ActiveControl = null;
                 else if (fullscreen) ToggleFullscreen();
                 return true;
         }
@@ -727,14 +920,12 @@ sealed partial class MainForm : Form
             case Keys.F2: EditSelected(); return true;
             case Keys.Up:
             case Keys.Down:
-                if (list.Focused) break;
+                if (ListFocused) break;
                 ChangeVolume(keyData == Keys.Up ? 10 : -10);
                 return true;
             case Keys.Enter:
-                if (list.Focused) { GotoSelected(); return true; }
-                if (split.Panel2Collapsed) TogglePanel();
-                player?.Pause();
-                noteBox.Focus();
+                if (ListFocused) { GotoSelected(); return true; }
+                FocusNoteBox();
                 return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);

@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
-namespace VideoNotlari;
+namespace KareNot;
 
 // Minimal libvlc 3.x bindings, loaded from the installed VLC (no NuGet packages needed).
 static class LibVlc

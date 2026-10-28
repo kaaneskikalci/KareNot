@@ -11,9 +11,10 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    <AssemblyName>VideoNotlari</AssemblyName>
-    <RootNamespace>VideoNotlari</RootNamespace>
-    <Product>Video Notları</Product>
+    <AssemblyName>KareNot</AssemblyName>
+    <RootNamespace>KareNot</RootNamespace>
+    <Product>KareNot</Product>
+    <ApplicationIcon>karenot.ico</ApplicationIcon>
     <InvariantGlobalization>false</InvariantGlobalization>
     <DebugType>none</DebugType>
   </PropertyGroup>

@@ -1,4 +1,4 @@
-namespace VideoNotlari;
+namespace KareNot;
 
 // Shows a frozen video frame over the player while an area is selected; the selection is drawn as a red frame.
 sealed class FrameOverlay : Control

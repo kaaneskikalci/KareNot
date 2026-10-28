@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
 
-namespace VideoNotlari;
+namespace KareNot;
 
 sealed class Note
 {
@@ -16,6 +16,10 @@ sealed class Note
 static class Kinds
 {
     public static readonly string[] All = { "BUG", "DEGISIKLIK", "NOT", "BIP", "KES_BASLA", "KES_BITIR" };
+
+    // Video editing marks ("Kurgu" tab); everything else belongs to the game test ("Oyun testi" tab).
+    public static readonly string[] Edit = { "BIP", "KES_BASLA", "KES_BITIR" };
+    public static bool IsEdit(string kind) => Edit.Contains(kind);
 
     public static string Label(string kind) => kind switch
     {

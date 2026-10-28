@@ -1,4 +1,4 @@
-namespace VideoNotlari;
+namespace KareNot;
 
 static class Program
 {
@@ -11,7 +11,7 @@ static class Program
         AppDomain.CurrentDomain.UnhandledException += (s, e) => ReportCrash(e.ExceptionObject as Exception);
         if (!LibVlc.TryInit(out var error))
         {
-            MessageBox.Show(error, "Video Notları", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(error, "KareNot", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
@@ -28,8 +28,8 @@ static class Program
 
     static void ReportCrash(Exception ex)
     {
-        var path = Path.Combine(Path.GetTempPath(), "videonotlari_hata.txt");
+        var path = Path.Combine(Path.GetTempPath(), "karenot_hata.txt");
         try { File.AppendAllText(path, DateTime.Now + "\n" + ex + "\n\n"); } catch { }
-        MessageBox.Show("Beklenmeyen hata (ayrıntı: " + path + "):\n\n" + ex?.Message, "Video Notları", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBox.Show("Beklenmeyen hata (ayrıntı: " + path + "):\n\n" + ex?.Message, "KareNot", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }

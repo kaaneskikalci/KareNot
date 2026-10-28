@@ -1,4 +1,4 @@
-namespace VideoNotlari;
+namespace KareNot;
 
 // Button that never takes keyboard focus, so Space/arrows always reach the player shortcuts.
 sealed class FlatButton : Button
