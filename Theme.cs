@@ -66,7 +66,7 @@ static class Theme
             FullScreen = "", ExitFullScreen = "", Volume = "", Mute = "", OpenFolder = "", Folder = "",
             Report = "", Camera = "", Edit = "", More = "", Help = "", Pane = "", Bug = "",
             Change = "", Note = "", Bip = "", Cut = "", Search = "", Clip = "", Check = "",
-            Down = "", Rewind = "", Export = "", Tools = "";
+            Down = "", Rewind = "", Export = "", Tools = "", File = "";
     }
 
     // ---------- Drawing ----------

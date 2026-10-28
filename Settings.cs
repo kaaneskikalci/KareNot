@@ -17,6 +17,7 @@ sealed class AppSettings
     public string FfmpegPath { get; set; } = "";
     public string WhisperPath { get; set; } = "";
     public string WhisperModel { get; set; } = "";
+    public string DataFolder { get; set; } = "";     // where the notes go; empty: Paths.DefaultRoot (next to KareNot.exe)
 
     public static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VideoNotlari");
     static string FilePath => Path.Combine(Dir, "ayarlar.json");

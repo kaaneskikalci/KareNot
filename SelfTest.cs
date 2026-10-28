@@ -304,6 +304,17 @@ sealed partial class MainForm
             Check(File.ReadAllLines(noteFiles[0]).Length == 6, "removing it leaves the open video's notes");
 
             MigrationTest(Check, Info);
+            DataMoveTest(Check);
+
+            // notlar.txt changed in another program ("Kayıt dosyası") is read again when the window is activated.
+            Check(!store.ChangedOnDisk(currentVideo), "notes file unchanged after own saves");
+            File.AppendAllText(noteFiles[0], $"99.00\t00:01:39.0\tNOT\tdisaridan\t{currentVideo}\t\n");
+            File.SetLastWriteTimeUtc(noteFiles[0], DateTime.UtcNow.AddSeconds(5));
+            Check(store.ChangedOnDisk(currentVideo), "outside edit of notlar.txt noticed");
+            OnActivated(EventArgs.Empty);
+            Check(CurrentNotes().Any(n => n.Text == "disaridan") && !store.ChangedOnDisk(currentVideo), "outside edit read back on activation");
+            store.Remove(CurrentNotes().First(n => n.Text == "disaridan"));
+            RefreshList();
 
             // Next video in the folder.
             StepVideo(1);
@@ -368,6 +379,14 @@ sealed partial class MainForm
                 dlg.Location = new Point(Left + (Width - dlg.Width) / 2, Top + (Height - dlg.Height) / 2);
                 await Wait(500);
                 CaptureHandle(dlg.Handle, Path.ChangeExtension(logPath, ".dialog.png"));
+                dlg.Close();
+            }
+            using (var dlg = new SettingsDialog(new AppSettings()) { StartPosition = FormStartPosition.Manual })
+            {
+                dlg.Show(this);
+                dlg.Location = new Point(Left + (Width - dlg.Width) / 2, Top + 20);
+                await Wait(500);
+                CaptureHandle(dlg.Handle, Path.ChangeExtension(logPath, ".ayarlar.png"));
                 dlg.Close();
             }
             gameList.Items[0].Selected = true;
@@ -451,6 +470,35 @@ sealed partial class MainForm
             Environment.SetEnvironmentVariable("VIDEONOTLARI_DATA", data);
             ReviewStore.Reload();
         }
+    }
+
+    // Choosing another notes folder in the settings: files move, notlar.txt and inceleme.json merge, a taken file name stays.
+    static void DataMoveTest(Action<bool, string> Check)
+    {
+        var dir = Path.Combine(Paths.Desktop, "klasor_testi");
+        string from = Path.Combine(dir, "eski"), to = Path.Combine(dir, "yeni");
+        Directory.CreateDirectory(Path.Combine(from, "oyun", "ss"));
+        Directory.CreateDirectory(Path.Combine(to, "oyun", "ss"));
+        const string header = "# saniye\tzaman\ttur\tnot\tvideo\tss\n";
+        File.WriteAllText(Path.Combine(from, "oyun", "notlar.txt"), header + "5.00\t00:00:05.0\tBUG\tduvar\toyun.mp4\t\n7.00\t00:00:07.0\tNOT\tyeni\toyun.mp4\t\n");
+        File.WriteAllText(Path.Combine(to, "oyun", "notlar.txt"), header + "5.00\t00:00:05.0\tBUG\tduvar\toyun.mp4\t\n");
+        File.WriteAllBytes(Path.Combine(from, "oyun", "ss", "a.png"), new byte[] { 1 });
+        File.WriteAllBytes(Path.Combine(from, "oyun", "ss", "b.png"), new byte[] { 2 });
+        File.WriteAllBytes(Path.Combine(to, "oyun", "ss", "b.png"), new byte[] { 3 });
+        File.WriteAllText(Path.Combine(from, "inceleme.json"), "{\"oyun.mp4\": {\"pos\": 7, \"build\": \"b12\"}}");
+        File.WriteAllText(Path.Combine(to, "inceleme.json"), "{\"oyun.mp4\": {\"pos\": 30}}");
+
+        var (moved, kept) = DataMove.Run(from, to);
+        var notes = NoteStore.ReadFile(Path.Combine(to, "oyun", "notlar.txt"));
+        var review = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(to, "inceleme.json")));
+        Check(moved == 3 && kept == 1 && notes.Count == 2 && !File.Exists(Path.Combine(from, "oyun", "notlar.txt"))
+            && File.Exists(Path.Combine(to, "oyun", "ss", "a.png")) && File.ReadAllBytes(Path.Combine(to, "oyun", "ss", "b.png"))[0] == 3
+            && File.Exists(Path.Combine(from, "oyun", "ss", "b.png")) && !File.Exists(Path.Combine(from, "inceleme.json"))
+            && review["oyun.mp4"]["pos"].GetValue<double>() == 30 && review["oyun.mp4"]["build"].GetValue<string>() == "b12",
+            $"notes folder move: {moved} moved, {kept} kept, notlar.txt and inceleme.json merged");
+        Check(DataMove.Nested(from, Path.Combine(from, "alt")) && !DataMove.Nested(from, to), "notes folder move: nested folders detected");
+        Check(Path.GetFileName(Paths.AppRoot) == "KareNot Notlar" && Paths.SamePath(Path.GetDirectoryName(Paths.AppRoot), Path.GetDirectoryName(Environment.ProcessPath)),
+            "default notes folder is next to the exe: " + Paths.AppRoot);
     }
 
     void CaptureWindow(string path) => CaptureHandle(Handle, path);

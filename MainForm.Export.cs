@@ -16,9 +16,9 @@ sealed partial class MainForm
     {
         exportMenu.ShowItemToolTips = true;
         exportMenu.Items.Add("Tüm videoların raporu", null, (s, e) => SaveReportOf(null)).ToolTipText =
-            "Bütün videoların notları tek raporda: Masaüstü\\KareNot\\rapor.md ve rapor.html.";
+            "Bütün videoların notları tek raporda: not klasöründe rapor.md ve rapor.html.";
         exportMenu.Items.Add("Notları CSV olarak kaydet", null, (s, e) => ExportCsv()).ToolTipText =
-            "Tüm videoların notları; Excel için ; ayraçlı, UTF-8. Masaüstü\\KareNot\\cikti klasörüne yazılır.";
+            "Tüm videoların notları; Excel için ; ayraçlı, UTF-8. Not klasöründeki cikti klasörüne yazılır.";
         exportMenu.Items.Add("Görev listesi (agent / ekip için)", null, (s, e) => ExportTaskList()).ToolTipText =
             "Açık oyun testi notları, her biri ayrı görev (Markdown): video, zaman, önem, SS / klip, Beklenen / Gözlenen / Kabul ölçütü.";
         exportMenu.Items.Add("Kurgu notları (JSON, editör/AI için)", null, (s, e) => _ = ExportEditNotes()).ToolTipText =
@@ -405,11 +405,44 @@ sealed partial class MainForm
 
     void ShowSettings()
     {
+        var oldRoot = Paths.Root;
         using var dlg = new SettingsDialog(settings);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         settings.Save();
         Ffmpeg.PathOverride = settings.FfmpegPath;
-        SetStatus("Ayarlar kaydedildi." + (Ffmpeg.Find() == null ? " " + Ffmpeg.Missing : ""));
+        Paths.Configured = settings.DataFolder;
+        var status = "Ayarlar kaydedildi." + (Ffmpeg.Find() == null ? " " + Ffmpeg.Missing : "");
+        if (!Paths.SamePath(oldRoot, Paths.Root)) status = ChangeDataFolder(oldRoot);
+        SetStatus(status);
+    }
+
+    // Offers to move the notes from the previous folder, then reads the notes of the new one.
+    string ChangeDataFolder(string oldRoot)
+    {
+        var newRoot = Paths.Root;
+        var status = "Notlar artık şuraya kaydediliyor: " + newRoot;
+        bool hasData = Directory.Exists(oldRoot) && Directory.EnumerateFileSystemEntries(oldRoot).Any();
+        if (hasData && DataMove.Nested(oldRoot, newRoot))
+            status += $" (eski notlar iç içe klasörde olduğu için taşınmadı: {oldRoot})";
+        else if (hasData && MessageBox.Show(this, $"Notlar artık şuraya kaydedilecek:\n{newRoot}\n\nEski klasördeki notlar, SS'ler ve klipler de " +
+                     $"oraya taşınsın mı?\n{oldRoot}\n\nHayır dersen eski notlar orada kalır ve listede görünmez.",
+                     "KareNot — not klasörü", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+        {
+            try
+            {
+                var (moved, kept) = DataMove.Run(oldRoot, newRoot);
+                status = $"Notlar {newRoot} klasörüne taşındı ({moved} dosya)." +
+                    (kept > 0 ? $" Yeni klasörde aynı adla bulunan {kept} dosya eski yerinde kaldı: {oldRoot}" : "");
+                Migration.Log($"Not klasörü değişti: {oldRoot} -> {newRoot}, {moved} dosya taşındı, {kept} dosya eski yerinde kaldı.");
+            }
+            catch (Exception ex)
+            {
+                status = "HATA: notların bir kısmı taşınamadı: " + ex.Message;
+                MessageBox.Show(this, status + $"\n\nTaşınmayan dosyalar eski yerinde duruyor:\n{oldRoot}", "KareNot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        ReloadNotes();
+        return status;
     }
 
     void OpenTextList(string file, Action ensure)

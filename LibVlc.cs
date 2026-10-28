@@ -114,7 +114,7 @@ sealed class VlcPlayer : IDisposable
     IntPtr instance, player;
     long pendingSeekMs = -1;
     bool pendingPause;
-    int seekTries;
+    int seekTries, seekSettled;
 
     public string FilePath { get; private set; }
     public bool HasMedia => FilePath != null;
@@ -197,7 +197,7 @@ sealed class VlcPlayer : IDisposable
             // The player has to run again before it accepts a position; Tick() applies it.
             pendingSeekMs = ms;
             pendingPause = true;
-            seekTries = 0;
+            seekTries = seekSettled = 0;
             LibVlc.libvlc_media_player_stop(player);
             LibVlc.libvlc_media_player_play(player);
             return;
@@ -205,20 +205,21 @@ sealed class VlcPlayer : IDisposable
         LibVlc.libvlc_media_player_set_time(player, ms);
     }
 
-    // Called by the UI timer. Right after a restart VLC may ignore the position, so it is sent again until the time
-    // follows (at most ~2 s); the pause comes only after that.
+    // Called by the UI timer. Right after a restart VLC may ignore the position or briefly report it and then start from 0,
+    // so it is sent again until the time follows on two ticks in a row (at most ~3 s); the pause comes only after that.
     public void Tick()
     {
         if (pendingSeekMs < 0 || State != LibVlc.StatePlaying) return;
         bool arrived = seekTries > 0 && Math.Abs(LibVlc.libvlc_media_player_get_time(player) - pendingSeekMs) < 1000;
-        if (!arrived && seekTries++ < 20)
+        seekSettled = arrived ? seekSettled + 1 : 0;
+        if (seekSettled < 2 && seekTries++ < 30)
         {
-            LibVlc.libvlc_media_player_set_time(player, pendingSeekMs);
+            if (!arrived) LibVlc.libvlc_media_player_set_time(player, pendingSeekMs);
             return;
         }
         if (pendingPause) LibVlc.libvlc_media_player_set_pause(player, 1);
         pendingSeekMs = -1;
-        seekTries = 0;
+        seekTries = seekSettled = 0;
     }
 
     public void SetRate(float rate) => LibVlc.libvlc_media_player_set_rate(player, rate);

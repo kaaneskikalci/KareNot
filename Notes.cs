@@ -116,11 +116,48 @@ static class Kinds
 
 static class Paths
 {
-    // VIDEONOTLARI_DATA overrides the Desktop folder (used by the self test).
-    public static string Desktop =>
-        Environment.GetEnvironmentVariable("VIDEONOTLARI_DATA") is { Length: > 0 } d ? d : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-    // Desktop\KareNot\ holds the shared files and one folder per video, named after the video file without its extension.
-    public static string Root => Path.Combine(Desktop, "KareNot");
+    // VIDEONOTLARI_DATA overrides the Desktop folder (used by the self test); the root is then always <it>\KareNot.
+    static string TestData => Environment.GetEnvironmentVariable("VIDEONOTLARI_DATA") is { Length: > 0 } d ? d : null;
+    public static string Desktop => TestData ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+
+    // The root holds the shared files and one folder per video, named after the video file without its extension. It is the
+    // folder chosen in the settings (Configured), else "KareNot Notlar" next to KareNot.exe, or Desktop\KareNot when the app's
+    // folder can't be written (Program Files).
+    public static string Configured = "";
+    public static string AppRoot => Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory, "KareNot Notlar");
+    public static string DesktopRoot => Path.Combine(Desktop, "KareNot");
+    static readonly Lazy<string> defaultRoot = new(() => CanWrite(AppRoot) ? AppRoot : DesktopRoot);
+    public static string DefaultRoot => defaultRoot.Value;
+    public static string Root => TestData != null ? Path.Combine(TestData, "KareNot") : Configured is { Length: > 0 } c ? c : DefaultRoot;
+
+    // Applies the settings' folder. v1.3 kept the notes on the Desktop: an existing Desktop\KareNot stays in use until another
+    // folder is chosen.
+    public static void Init(AppSettings settings)
+    {
+        if (TestData != null) return;
+        if (settings.DataFolder.Length == 0 && Directory.Exists(DesktopRoot) && !SamePath(DesktopRoot, DefaultRoot))
+        {
+            settings.DataFolder = DesktopRoot;
+            settings.Save();
+        }
+        Configured = settings.DataFolder;
+    }
+
+    public static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a).TrimEnd('\\', '/'), Path.GetFullPath(b).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
+    static bool CanWrite(string dir)
+    {
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var probe = Path.Combine(dir, ".yazma_testi");
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch { return false; }
+    }
     public static string ReviewFile => Path.Combine(Root, "inceleme.json");
 
     public static string FolderName(string video)
@@ -208,8 +245,26 @@ sealed class NoteStore
     public void Load()
     {
         All.Clear();
-        All.AddRange(ReadAll());
+        stamps.Clear();
+        if (Directory.Exists(Paths.Root))
+            foreach (var dir in Directory.GetDirectories(Paths.Root))
+            {
+                var file = Path.Combine(dir, "notlar.txt");
+                All.AddRange(ReadFile(file));
+                Stamp(file);
+            }
         Sort();
+    }
+
+    // Write times of the notes files as last read or written here, to notice edits made in another program.
+    readonly Dictionary<string, DateTime> stamps = new(StringComparer.OrdinalIgnoreCase);
+    static DateTime WriteTime(string path) => File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+    void Stamp(string path) => stamps[path] = WriteTime(path);
+
+    public bool ChangedOnDisk(string video)
+    {
+        var path = Paths.NotesFile(video);
+        return WriteTime(path) != (stamps.TryGetValue(path, out var t) ? t : DateTime.MinValue);
     }
 
     void Sort() => All.Sort((a, b) =>
@@ -237,10 +292,13 @@ sealed class NoteStore
         if (notes.Count == 0)
         {
             if (File.Exists(path)) File.Delete(path);
-            return;
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(path));
-        WriteAtomic(path, notes);
+        else
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            WriteAtomic(path, notes);
+        }
+        Stamp(path);
     }
 
     public static void WriteAtomic(string path, IEnumerable<Note> notes)
@@ -375,7 +433,7 @@ static class Migration
                 Directory.Move(oldDir, target);
                 renamed = $" Eski klasör: {Path.GetFileName(target)}.";
             }
-            var message = $"Eski veriler Masaüstü\\KareNot klasörüne taşındı ({added} not, {copied.Count} SS / klip).{renamed}";
+            var message = $"Eski veriler {Paths.Root} klasörüne taşındı ({added} not, {copied.Count} SS / klip).{renamed}";
             Log(message);
             return (message, false);
         }
@@ -408,7 +466,7 @@ static class Migration
         new FileInfo(a).Length == new FileInfo(b).Length && File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
 
     // Adds the old file's videos and keys that the new inceleme.json does not have; an unreadable old file is left alone.
-    static void MergeReview(string oldFile, string newFile)
+    public static void MergeReview(string oldFile, string newFile)
     {
         JsonObject old;
         try { old = JsonNode.Parse(File.ReadAllText(oldFile)) as JsonObject; } catch { return; }
@@ -427,9 +485,57 @@ static class Migration
         File.Move(newFile + ".tmp", newFile, true);
     }
 
-    static void Log(string text)
+    public static void Log(string text)
     {
         try { File.AppendAllText(Path.Combine(Paths.Root, "tasima_gunlugu.txt"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}\n", new UTF8Encoding(false)); }
         catch { }
+    }
+}
+
+// Moves the notes folder's content when another folder is chosen in the settings. Files missing in the target are moved; a
+// notlar.txt in both gets the notes it lacks and inceleme.json the videos and keys it lacks; any other file in both stays in the
+// old folder. Folders left empty are removed.
+static class DataMove
+{
+    public static bool Nested(string a, string b)
+    {
+        string Norm(string p) => Path.GetFullPath(p).TrimEnd('\\', '/') + "\\";
+        return Norm(a).StartsWith(Norm(b), StringComparison.OrdinalIgnoreCase) || Norm(b).StartsWith(Norm(a), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static (int Moved, int Kept) Run(string from, string to)
+    {
+        int moved = 0, kept = 0;
+        if (!Directory.Exists(from)) return (0, 0);
+        foreach (var source in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(from, source);
+            var target = Path.Combine(to, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            if (!File.Exists(target))
+                File.Move(source, target);
+            else if (Path.GetFileName(source) == "notlar.txt")
+            {
+                var have = NoteStore.ReadFile(target);
+                var keys = have.Select(NoteStore.Key).ToHashSet();
+                have.AddRange(NoteStore.ReadFile(source).Where(n => !keys.Contains(NoteStore.Key(n))));
+                NoteStore.WriteAtomic(target, have.OrderBy(n => n.Video, StringComparer.Ordinal).ThenBy(n => n.T));
+                File.Delete(source);
+            }
+            else if (relative == "inceleme.json")
+            {
+                Migration.MergeReview(source, target);
+                File.Delete(source);
+            }
+            else
+            {
+                kept++;
+                continue;
+            }
+            moved++;
+        }
+        foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length).Append(from))
+            if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+        return (moved, kept);
     }
 }

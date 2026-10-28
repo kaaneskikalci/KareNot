@@ -66,28 +66,37 @@ kendi sekmesini açar. `F1` kısayol listesini gösterir.
 | Bipli ve kesilmiş video | *Dışa aktar ▾* | Kurgunun hızlı ilk hâli (ffmpeg) |
 | CSV | *Dışa aktar ▾* | Excel, Trello, Jira içe aktarma |
 
-Rapor ve çıktılar açık videonun klasörüne (`Masaüstü\KareNot\<video adı>\`, çıktılar `cikti\` altında) yazılır; birden çok
-videoyu kapsayanlar (tüm videoların raporu, CSV, "Tüm videolar" ZIP'i) `Masaüstü\KareNot\` ve `Masaüstü\KareNot\cikti\` içine.
+Rapor ve çıktılar açık videonun klasörüne (`KareNot Notlar\<video adı>\`, çıktılar `cikti\` altında) yazılır; birden çok
+videoyu kapsayanlar (tüm videoların raporu, CSV, "Tüm videolar" ZIP'i) `KareNot Notlar\` ve `KareNot Notlar\cikti\` içine.
 
 ## Dosyalar
+
+Notlar varsayılan olarak `KareNot.exe`'nin yanındaki **`KareNot Notlar`** klasörüne kaydedilir (exe'yi nereye koyduysan
+orası; oraya yazılamıyorsa, ör. `Program Files`, `Masaüstü\KareNot`). *Araçlar ▾ → Ayarlar → Notların kaydedileceği klasör*
+ile başka bir klasör seçilebilir; değiştirince eski klasördeki notları, SS'leri ve klipleri taşımayı sorar (aynı adlı
+`notlar.txt` ve `inceleme.json` birleştirilir). v1.3'ten kalan `Masaüstü\KareNot` varsa başka klasör seçilene kadar o kullanılır.
+
+Alt çubuktaki **Kayıt dosyası** açık videonun `notlar.txt` dosyasını metin düzenleyicide açar; orada değiştirip kaydedince
+KareNot'a dönüldüğünde notlar yeniden okunur.
 
 Her video kendi adını taşıyan bir klasörde (uzantısız ad; aynı adlı `.mp4` ve `.mkv` aynı klasörü paylaşır):
 
 | Yer | İçerik |
 |-----|--------|
-| `Masaüstü\KareNot\<video adı>\notlar.txt` | Videonun notları (esas kaynak) |
-| `Masaüstü\KareNot\<video adı>\ss\` | Videonun ekran görüntüleri ve klipleri |
-| `Masaüstü\KareNot\<video adı>\rapor.md`, `rapor.html`, `cikti\` | Videonun raporu ve çıktıları |
-| `Masaüstü\KareNot\inceleme.json` | Kaldığın yer, inceleme durumu, build / testçi (tüm videolar) |
-| `Masaüstü\KareNot\hazir_notlar.txt`, `kufur_listesi.txt` | Düzenlenebilir listeler |
-| `Masaüstü\KareNot\rapor.md`, `rapor.html`, `cikti\` | Tüm videoların raporu ve çok videolu çıktılar |
+| `KareNot Notlar\<video adı>\notlar.txt` | Videonun notları (esas kaynak) |
+| `KareNot Notlar\<video adı>\ss\` | Videonun ekran görüntüleri ve klipleri |
+| `KareNot Notlar\<video adı>\rapor.md`, `rapor.html`, `cikti\` | Videonun raporu ve çıktıları |
+| `KareNot Notlar\inceleme.json` | Kaldığın yer, inceleme durumu, build / testçi (tüm videolar) |
+| `KareNot Notlar\hazir_notlar.txt`, `kufur_listesi.txt` | Düzenlenebilir listeler |
+| `KareNot Notlar\rapor.md`, `rapor.html`, `cikti\` | Tüm videoların raporu ve çok videolu çıktılar |
 
 Eski sürümlerin `Masaüstü\Video Notlari\` klasörü (ve `Masaüstü\video_notlari.txt`) ilk açılışta bu düzene taşınır: notlar
-ve SS / klipler videoların klasörlerine, listeler ve `inceleme.json` `KareNot\` içine; eski klasör `Video Notlari (eski)` adıyla
-kalır (eski raporlar ve çıktılar onun içinde). Taşıma kaydı: `Masaüstü\KareNot\tasima_gunlugu.txt`.
+ve SS / klipler videoların klasörlerine, listeler ve `inceleme.json` not klasörüne; eski klasör `Video Notlari (eski)` adıyla
+kalır (eski raporlar ve çıktılar onun içinde). Taşıma kaydı: `KareNot Notlar\tasima_gunlugu.txt`.
 
 Not dosyaları sekmeyle ayrılmış metindir: `saniye  zaman  tür  not  video  ss  durum  önem  bitiş  klip`
-(sondaki boş sütunlar yazılmaz; eski 5–6 sütunlu dosyalar olduğu gibi okunur). IINA eklentisi aynı dosyaları kullanır.
+(sondaki boş sütunlar yazılmaz; eski 5–6 sütunlu dosyalar olduğu gibi okunur). IINA eklentisi aynı dosyaları kullanır
+(Mac'te not klasörü şimdilik `Masaüstü\KareNot`).
 
 ## Test durumu
 
@@ -99,6 +108,8 @@ bir ses kaydıyla denendi. **Henüz denenmedi:**
 - *Dışa aktar ▾* ve *Araçlar ▾* işlemlerinin uygulama içinden kullanımı: bulgu paketi (ZIP), klip çıkarma, bipli ve kesilmiş
   video, görev listesi, kurgu notları, CSV, Resolve EDL, Ayarlar penceresi. Bunların ffmpeg / dosya tarafı ayrıca
   denendi, menüden tıklanarak denenmedi. DaVinci Resolve'a EDL içe aktarma da denenmedi.
+- Ayarlar'dan not klasörünü değiştirip taşıma ve *Kayıt dosyası* düğmesi elle denenmedi (taşıma ve dışarıda değişen
+  `notlar.txt`'nin yeniden okunması otomatik testte denendi).
 - %100'den büyük ekran ölçeklemesi.
 - Eski `Video Notlari` klasörünün taşınması gerçek verilerle (yalnız otomatik testte hazırlanan örnekle denendi).
 

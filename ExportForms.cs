@@ -170,7 +170,8 @@ sealed class SettingsDialog : DarkDialog
     readonly AppSettings settings;
     readonly NumericUpDown clipBefore = Num(), clipAfter = Num(), loopBefore = Num(), loopAfter = Num(), beep = Num(0.1m, 10), deadAir = Num(1, 600);
     readonly TextBox ffmpeg = Dark(new TextBox { Width = 380 }), whisper = Dark(new TextBox { Width = 380 }), model = Dark(new TextBox { Width = 380 });
-    readonly Label ffmpegHint = Lbl("", Theme.Faint), whisperHint = Lbl("", Theme.Faint);
+    readonly TextBox dataFolder = Dark(new TextBox { Width = 380 });
+    readonly Label ffmpegHint = Lbl("", Theme.Faint), whisperHint = Lbl("", Theme.Faint), dataHint = Lbl("", Theme.Faint);
 
     static NumericUpDown Num(decimal min = 0, decimal max = 120) =>
         Dark(new NumericUpDown { Minimum = min, Maximum = max, DecimalPlaces = 1, Increment = 0.5m, Width = 80, Margin = new Padding(3, 4, 3, 2) });
@@ -190,7 +191,13 @@ sealed class SettingsDialog : DarkDialog
         ffmpeg.Text = settings.FfmpegPath;
         whisper.Text = settings.WhisperPath;
         model.Text = settings.WhisperModel;
+        dataFolder.Text = settings.DataFolder.Length > 0 ? settings.DataFolder : Paths.DefaultRoot;
 
+        AddRow(Lbl("Notlar", bold: true));
+        AddRow(Lbl("Notların kaydedileceği klasör"), BrowseFolder(dataFolder));
+        AddRow(new Label(), dataHint);
+        dataFolder.TextChanged += (s, e) => UpdateHints();
+        Shown += (s, e) => dataFolder.Select(0, 0);
         AddRow(Lbl("Klip ve döngü (saniye)", bold: true));
         AddRow(Lbl("Klip: nottan önce / sonra"), Pair(clipBefore, clipAfter));
         AddRow(Lbl("Döngü: nottan önce / sonra"), Pair(loopBefore, loopAfter));
@@ -232,8 +239,38 @@ sealed class SettingsDialog : DarkDialog
         return f;
     }
 
+    FlowLayoutPanel BrowseFolder(TextBox box)
+    {
+        var pick = StyledButton("Seç…");
+        pick.Click += (s, e) =>
+        {
+            using var dlg = new FolderBrowserDialog { Description = "Notların kaydedileceği klasör", UseDescriptionForTitle = true };
+            try { if (Directory.Exists(box.Text)) dlg.InitialDirectory = box.Text; } catch { }
+            if (dlg.ShowDialog(this) == DialogResult.OK) box.Text = dlg.SelectedPath;
+        };
+        var reset = StyledButton("Varsayılan");
+        reset.Click += (s, e) => box.Text = Paths.DefaultRoot;
+        var f = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0), WrapContents = false };
+        f.Controls.AddRange(new Control[] { Field(box), pick, reset });
+        return f;
+    }
+
+    // The chosen notes folder, "" for the default one.
+    string ChosenDataFolder()
+    {
+        var path = dataFolder.Text.Trim();
+        if (path.Length > 0 && !Path.IsPathFullyQualified(path)) return path;
+        try { return path.Length == 0 || Paths.SamePath(path, Paths.DefaultRoot) ? "" : Path.GetFullPath(path); }
+        catch { return path; }
+    }
+
     void UpdateHints()
     {
+        var chosen = ChosenDataFolder();
+        bool rooted = chosen.Length == 0 || Path.IsPathFullyQualified(chosen);
+        SetHint(dataHint, rooted ? null : false, !rooted ? "Tam bir klasör yolu yaz (örneğin D:\\Notlar)." : chosen.Length == 0
+            ? (Paths.SamePath(Paths.DefaultRoot, Paths.AppRoot) ? "Varsayılan: uygulamanın yanındaki KareNot Notlar klasörü." : "Varsayılan (uygulamanın klasörüne yazılamıyor).")
+            : "Her video bu klasörün içinde kendi adıyla bir klasör alır.");
         var path = ffmpeg.Text.Trim();
         if (path.Length > 0)
             SetHint(ffmpegHint, File.Exists(path), File.Exists(path) ? "ffmpeg bulundu." : "Bu dosya yok.");
@@ -260,6 +297,14 @@ sealed class SettingsDialog : DarkDialog
     {
         base.OnFormClosing(e);
         if (DialogResult != DialogResult.OK) return;
+        var chosen = ChosenDataFolder();
+        if (chosen.Length > 0 && !Path.IsPathFullyQualified(chosen))
+        {
+            dataFolder.Focus();
+            e.Cancel = true;
+            return;
+        }
+        settings.DataFolder = chosen;
         settings.ClipBefore = (double)clipBefore.Value;
         settings.ClipAfter = (double)clipAfter.Value;
         settings.LoopBefore = (double)loopBefore.Value;

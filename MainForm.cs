@@ -127,6 +127,7 @@ sealed partial class MainForm : Form
         tabStrip = new TabStrip(tips) { Height = 44 };
 
         Ffmpeg.PathOverride = settings.FfmpegPath;
+        Paths.Init(settings);
         migration = Migration.Run();
         ReviewStore.Reload();
         BuildLayout();
@@ -167,7 +168,7 @@ sealed partial class MainForm : Form
         var separator = new Pane { Size = new Size(1, 24), BackColor = Theme.Border, Margin = new Padding(14, 0, 14, 0) };
         var openButton = Btn("Video aç", OpenDialog, "Video aç (Ctrl+O) — videoyu pencereye sürükleyip bırakmak da olur", Theme.Glyph.OpenFolder);
         var reportButton = Btn("Raporu kaydet", SaveReport, "Raporu kaydet (Ctrl+S): rapor.md ve rapor.html açık videonun klasörüne\n" +
-            "(Masaüstü\\KareNot\\<video>); video açık değilse tüm videoların raporu Masaüstü\\KareNot'a", Theme.Glyph.Report);
+            "(<not klasörü>\\<video>); video açık değilse tüm videoların raporu not klasörüne", Theme.Glyph.Report);
         reportButton.Primary = true;
         openButton.BaseHeight = reportButton.BaseHeight = 36;
         openButton.Padding = reportButton.Padding = new Padding(14, 0, 14, 0);
@@ -359,8 +360,10 @@ sealed partial class MainForm : Form
         exportButton.Click += (s, e) => exportMenu.Show(exportButton, new Point(0, exportButton.Height));
         var toolsButton = Btn("Araçlar", null, "Ayarlar, hazır metinler ve küfür listesi, kesilmiş hâli izle, küfür adayları, ölü anlar", Theme.Glyph.Tools);
         toolsButton.Click += (s, e) => toolsMenu.Show(toolsButton, new Point(0, toolsButton.Height));
-        var folderButton = Btn("Klasörü aç", OpenFolder, "Açık videonun klasörünü aç (Masaüstü\\KareNot\\<video>); video yoksa Masaüstü\\KareNot", Theme.Glyph.Folder);
-        foreach (var b in new[] { exportButton, toolsButton, folderButton })
+        var folderButton = Btn("Klasörü aç", OpenFolder, "Açık videonun klasörünü aç (<not klasörü>\\<video>); video yoksa not klasörünü", Theme.Glyph.Folder);
+        var notesFileButton = Btn("Kayıt dosyası", OpenNotesFile,
+            "Açık videonun kayıt dosyasını (notlar.txt) metin düzenleyicide aç. Kaydedip KareNot'a dönünce notlar yeniden okunur.", Theme.Glyph.File);
+        foreach (var b in new[] { exportButton, toolsButton, folderButton, notesFileButton })
         {
             b.Quiet = true;
             b.Font = Theme.Small;
@@ -368,8 +371,8 @@ sealed partial class MainForm : Form
         }
         exportButton.Chevron = toolsButton.Chevron = true;
         var footerRow = new SplitRow(32) { Elastic = saveIndicator, ElasticMin = () => saveIndicator.MinWidth, Gap = 2 }
-            .L(saveIndicator).R(exportButton, toolsButton, folderButton);
-        footerRow.Compactable.AddRange(new[] { folderButton, toolsButton, exportButton });
+            .L(saveIndicator).R(exportButton, toolsButton, notesFileButton, folderButton);
+        footerRow.Compactable.AddRange(new[] { folderButton, notesFileButton, toolsButton, exportButton });
         tips.SetToolTip(saveIndicator, "Notlar her değişiklikte kaydedilir: " + Path.Combine(Paths.Root, "<video>", "notlar.txt"));
         footer = new Column { AutoSize = true, Padding = new Padding(12, 6, 10, 4) };
         Stack(footer, null, new Control[] { status, footerRow });
@@ -1461,6 +1464,47 @@ sealed partial class MainForm : Form
         Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
     }
 
+    // Opens the open video's notlar.txt in the text editor; edits saved there are read back when KareNot is activated again.
+    void OpenNotesFile()
+    {
+        if (currentVideo == null)
+        {
+            SetStatus("Önce bir video aç; kayıt dosyası videonun klasöründe: " + Path.Combine(Paths.Root, "<video>", "notlar.txt"));
+            return;
+        }
+        var file = Paths.NotesFile(currentVideo);
+        if (!File.Exists(file))
+        {
+            SetStatus("Bu videoda henüz not yok; ilk notla birlikte oluşur: " + file);
+            return;
+        }
+        try
+        {
+            Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
+            SetStatus("Kayıt dosyası açıldı. Değiştirip kaydedersen KareNot'a dönünce notlar yeniden okunur: " + file);
+        }
+        catch (Exception ex) { SetStatus("HATA: kayıt dosyası açılamadı: " + ex.Message); }
+    }
+
+    // Reads the notes again when notlar.txt of the open video was changed in another program (OpenNotesFile).
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        if (currentVideo == null || !store.ChangedOnDisk(currentVideo)) return;
+        ReloadNotes();
+        SetStatus("Kayıt dosyası dışarıda değişmiş; notlar yeniden okundu.");
+    }
+
+    // After the notes folder or a notes file changed outside the store.
+    void ReloadNotes()
+    {
+        store.Load();
+        ReviewStore.Reload();
+        RefreshList();
+        RefreshSeekRanges();
+        tips.SetToolTip(saveIndicator, "Notlar her değişiklikte kaydedilir: " + Path.Combine(Paths.Root, "<video>", "notlar.txt"));
+    }
+
     void SetStatus(string text)
     {
         status.Text = text;
@@ -1535,7 +1579,7 @@ sealed partial class MainForm : Form
         }),
         ("RAPOR", new[]
         {
-            ("Ctrl+S", "Raporu kaydet (rapor.md ve rapor.html, Masaüstü\\KareNot\\<video>\\; video yoksa tüm videolar)"),
+            ("Ctrl+S", "Raporu kaydet (rapor.md ve rapor.html, <not klasörü>\\<video>\\; video yoksa tüm videolar)"),
             ("Ctrl+P", "Bulgu paketi (ZIP): rapor, görev listesi, SS'ler ve klipler"),
             ("Dışa aktar ▾", "CSV, görev listesi, kurgu notları (JSON), DaVinci Resolve işaretleri, bipli/kesilmiş video"),
             ("Araçlar ▾", "Ayarlar, küfür adayları, ölü anlar, listeleri düzenle"),
