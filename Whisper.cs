@@ -23,7 +23,7 @@ static partial class Whisper
         };
         // -ml 1 -sow: one segment per word (word-level timestamps); -oj -of: JSON next to outBase; -pp: progress on stderr.
         foreach (var a in new[] { "-m", model, "-f", wav, "-l", language, "-ml", "1", "-sow", "-oj", "-of", outBase, "-pp",
-            "-t", Math.Clamp(Environment.ProcessorCount, 1, 8).ToString(CultureInfo.InvariantCulture) })
+            "-t", Math.Clamp(Environment.ProcessorCount / 2, 1, 16).ToString(CultureInfo.InvariantCulture) })
             psi.ArgumentList.Add(a);
         var json = outBase + ".json";
         try

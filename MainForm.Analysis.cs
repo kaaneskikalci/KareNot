@@ -116,7 +116,7 @@ sealed partial class MainForm
                         foreach (var h in add)
                         {
                             var n = store.Add(h.Start, "BIP", "aday: " + h.Text, video, null);
-                            n.End = Math.Max(h.End, h.Start) + 0.1;
+                            n.End = Math.Max(h.End + 0.1, h.Start + 0.4);   // whisper can report zero-length words
                         }
                         store.Save(video);
                     });
