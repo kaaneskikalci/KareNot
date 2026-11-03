@@ -197,13 +197,14 @@ sealed class NoteStore
     public readonly List<Note> All = new();
     long orderCounter;
 
+    // hh:mm:ss.s with the tenths floored. Works on whole tenths: t % 60 on a double is not exact (60.3 % 60 is 0.2999...),
+    // which used to show 60.3 s as 00:01:00.2. The small epsilon keeps values read from the file ("60.30") on their tenth.
     public static string Fmt(double t)
     {
-        if (t < 0) t = 0;
-        int h = (int)(t / 3600);
-        int m = (int)(t % 3600 / 60);
-        double s = t % 60;
-        return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00.0}", h, m, Math.Floor(s * 10) / 10);
+        if (!(t > 0)) t = 0;
+        long tenths = (long)Math.Floor(t * 10 + 1e-6);
+        long h = tenths / 36000, m = tenths / 600 % 60, s = tenths / 10 % 60, d = tenths % 10;
+        return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00}.{3}", h, m, s, d);
     }
 
     public static string Clean(string text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();

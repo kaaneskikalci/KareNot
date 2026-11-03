@@ -15,6 +15,36 @@ public class TimeFormatTests
         Assert.Equal(expected, NoteStore.Fmt(seconds));
     }
 
+    // Regression: t % 60 on a double made these show one tenth too little (60.3 -> 00:01:00.2).
+    [Theory]
+    [InlineData(60.3, "00:01:00.3")]
+    [InlineData(61.8, "00:01:01.8")]
+    [InlineData(3600.7, "01:00:00.7")]
+    [InlineData(123.4, "00:02:03.4")]
+    public void Fmt_keeps_the_exact_tenth_after_the_first_minute(double seconds, string expected)
+    {
+        Assert.Equal(expected, NoteStore.Fmt(seconds));
+    }
+
+    [Fact]
+    public void Fmt_shows_every_two_decimal_file_value_on_its_own_tenth()
+    {
+        // Notes are stored with two decimals; every such value up to 3 hours must floor to its own tenth.
+        for (int k = 0; k < 3 * 3600 * 100; k++)
+        {
+            double t = double.Parse((k / 100.0).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
+            long tenths = k / 10;
+            var expected = $"{tenths / 36000:00}:{tenths / 600 % 60:00}:{tenths / 10 % 60:00}.{tenths % 10}";
+            Assert.True(expected == NoteStore.Fmt(t), $"{t} -> {NoteStore.Fmt(t)}, expected {expected}");
+        }
+    }
+
+    [Fact]
+    public void Fmt_treats_nan_as_zero()
+    {
+        Assert.Equal("00:00:00.0", NoteStore.Fmt(double.NaN));
+    }
+
     [Fact]
     public void Fmt_does_not_depend_on_the_current_culture()
     {
