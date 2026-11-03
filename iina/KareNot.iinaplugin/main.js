@@ -9,15 +9,43 @@ function log(msg) {
   try { iina.console.log("[KareNot] " + msg); } catch (e) { /* ignore */ }
 }
 
-// ---------- Paths (same layout as the Windows app, rooted at ~/Desktop) ----------
+// ---------- Paths (same layout inside the notes folder as the Windows app) ----------
 //
-// ~/Desktop/KareNot/inceleme.json            review state of all videos
-// ~/Desktop/KareNot/<video base name>/notlar.txt, ss/, rapor.md
+// <root>/inceleme.json            review state of all videos
+// <root>/<video base name>/notlar.txt, ss/, rapor.md
+//
+// <root> is ~/Desktop/KareNot unless another folder was chosen with "Not klasörünü seç…" (dataFolder preference).
+// Windows keeps its notes in "KareNot Notlar" next to KareNot.exe; a Mac has no such place, and ~/Desktop/KareNot is
+// where this plugin and the Windows app up to v1.4 kept them. To share notes with Windows, pick the same synced folder
+// on both sides.
 
 const DESKTOP = utils.resolvePath("~/Desktop").replace(/\/+$/, "");
-const ROOT = DESKTOP + "/KareNot";
-const REVIEW = ROOT + "/inceleme.json";
+const HOME = DESKTOP.slice(0, DESKTOP.lastIndexOf("/"));   // resolvePath("~") is rejected as not absolute
+const DEFAULT_ROOT = DESKTOP + "/KareNot";
 const NOTES_NAME = "notlar.txt";
+let ROOT, REVIEW, LOCK;
+
+function configuredRoot() {
+  let p = "";
+  try { p = preferences.get("dataFolder") || ""; } catch (e) { p = ""; }
+  p = String(p).replace(/\/+$/, "");
+  return p.charAt(0) === "/" ? p : DEFAULT_ROOT;
+}
+
+function setRoot(dir) {
+  ROOT = dir;
+  REVIEW = ROOT + "/inceleme.json";
+  LOCK = ROOT + "/.tasiniyor";
+}
+
+setRoot(configuredRoot());
+
+// Short form for messages: Masaüstü/KareNot/..., ~/...
+function shortPath(p) {
+  if (p.indexOf(DESKTOP + "/") === 0) return "Masaüstü/" + p.slice(DESKTOP.length + 1);
+  if (HOME && p.indexOf(HOME + "/") === 0) return "~/" + p.slice(HOME.length + 1);
+  return p;
+}
 
 // Layout before v1.4 (migrated once, see migrate()).
 const OLD_WORK = DESKTOP + "/Video Notlari";
@@ -50,10 +78,6 @@ function dirName(path) {
   return path.slice(0, path.lastIndexOf("/"));
 }
 
-function baseName(path) {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
 // Folder a note belongs to: the folder of the file it was read from (so a note stays where another app put it),
 // otherwise its video's folder.
 function noteFolder(n) {
@@ -84,6 +108,14 @@ async function ensureDir(dir) {
   return !!madeDirs[dir];
 }
 
+// IINA's file.delete only works under @tmp / @data, and file.write refuses to overwrite an existing file outside them
+// (JavascriptAPIFile.swift). Files in the notes folder are therefore removed with /bin/rm and replaced by writing a new
+// .tmp file and moving it over the old one with /bin/mv.
+async function removeFile(path) {
+  if (!file.exists(path)) return true;
+  return run("/bin/rm", ["-f", path]);
+}
+
 function writeAtomic(path, content) {
   pending[path] = content;
   return enqueue(async () => {
@@ -91,22 +123,15 @@ function writeAtomic(path, content) {
     const tmp = path + ".tmp";
     let ok = false;
     try {
+      await removeFile(tmp);   // left over from a crash; file.write would refuse to overwrite it
       file.write(tmp, content);
-      const r = await utils.exec("/bin/mv", ["-f", tmp, path]);
-      ok = r.status === 0;
-      if (!ok) log("mv failed: " + r.stderr);
+      ok = await run("/bin/mv", ["-f", tmp, path]);
     } catch (e) {
       log("atomic write failed for " + path + ": " + e);
     }
     if (!ok) {
-      try {
-        file.write(path, content);
-        ok = true;
-      } catch (e) {
-        log("write failed for " + path + ": " + e);
-        osd("KareNot: dosya yazılamadı (" + path.split("/").pop() + ")");
-      }
-      try { if (file.exists(tmp)) file.delete(tmp); } catch (e) { /* ignore */ }
+      await removeFile(tmp);
+      osd("KareNot: dosya yazılamadı (" + path.split("/").pop() + ")");
     }
     if (pending[path] === content) delete pending[path];
   });
@@ -115,7 +140,7 @@ function writeAtomic(path, content) {
 function deleteFile(path) {
   pending[path] = null;
   return enqueue(async () => {
-    try { if (file.exists(path)) file.delete(path); } catch (e) { log("delete failed: " + e); }
+    await removeFile(path);
     if (pending[path] === null) delete pending[path];
   });
 }
@@ -164,11 +189,18 @@ function noteFilePaths() {
   return paths;
 }
 
+// Notes of a file with their video names in NFC, the form currentVideoName() returns (see F.nfc).
+function parseNotes(text) {
+  const list = F.parseNotes(text);
+  for (const n of list) n.video = F.nfc(n.video);
+  return list;
+}
+
 // All notes of all videos; each remembers the file it came from (src).
 function readAllFromDisk() {
   const list = [];
   for (const p of noteFilePaths()) {
-    for (const n of F.parseNotes(readText(p))) {
+    for (const n of parseNotes(readText(p))) {
       n.src = p;
       list.push(n);
     }
@@ -273,7 +305,7 @@ function currentVideoName() {
     const url = core.status.url || "";
     try { name = decodeURIComponent(url.split("?")[0].split("/").pop() || ""); } catch (e) { name = ""; }
   }
-  return name;
+  return F.nfc(name);
 }
 
 function seekExact(t) {
@@ -348,9 +380,11 @@ function rows(which) {
   return result.sort((a, b) => a.t - b.t);
 }
 
+// The state goes as JSON text (F.webviewJson), so a backtick or "${" in a note or video name cannot break IINA's
+// String.raw wrapper; sidebar.js parses it.
 function pushState() {
   const rev = video ? reviewEntry(video) : {};
-  sidebar.postMessage("state", {
+  sidebar.postMessage("state", { json: F.webviewJson({
     video: video,
     tab: tab,
     selectedId: selectedId,
@@ -361,7 +395,7 @@ function pushState() {
     loop: loop != null,
     game: rows("game"),
     edit: rows("edit"),
-  });
+  }) });
 }
 
 function setTab(which) {
@@ -389,15 +423,17 @@ async function addNote(kind, textArg) {
     return;
   }
   busy = true;
+  // The next file can load while the screenshot is awaited; the note belongs to the video it was taken on.
+  const v = video;
   try {
     let shot = null;
     // A marked area always gets a screenshot, like the Windows app.
-    if (game && (ssEnabled || areaRect)) shot = await takeShot(kind, t);
+    if (game && (ssEnabled || areaRect)) shot = await takeShot(kind, t, v);
     stopLoop();
-    const n = { id: nextId++, t: t, kind: kind, text: text, video: video, shot: shot,
+    const n = { id: nextId++, t: t, kind: kind, text: text, video: v, shot: shot,
       status: null, severity: null, end: null, clip: null };
     notes.push(n);
-    persist(video);
+    persist(v);
     selectedId = n.id;
     setTab(game ? "game" : "edit");
     if (game || textArg != null) {
@@ -411,9 +447,10 @@ async function addNote(kind, textArg) {
   }
 }
 
-async function takeShot(kind, t) {
-  const dir = folderOf(video) + "/ss";
+async function takeShot(kind, t, v) {
+  const dir = folderOf(v) + "/ss";
   if (!(await ensureDir(dir))) { osd("SS klasörü oluşturulamadı"); return null; }
+  if (video !== v) return null;   // another file loaded meanwhile: its frame is not this note's
   const name = F.shotName(kind, new Date(), t, ++shotCounter);
   const path = dir + "/" + name;
   try {
@@ -641,7 +678,7 @@ async function burnArea(path, f) {
     } catch (e) {
       log("ffmpeg burn error: " + e);
     }
-    try { if (file.exists(tmp)) file.delete(tmp); } catch (e) { /* ignore */ }
+    await removeFile(tmp);
   }
   try {
     const script = jxaBurn.toString() + "\nfunction run(argv) { return jxaBurn(argv); }\n";
@@ -677,7 +714,7 @@ function writeReport() {
   if (!mine.some((n) => n.video === video)) { osd("Bu videoda not yok"); pushState(); return; }
   const r = F.buildReport(mine, resolveShot, new Date());
   writeAtomic(folder + "/rapor.md", r.text).then(() => {
-    osd("Rapor kaydedildi: Masaüstü/KareNot/" + baseName(folder) + "/rapor.md" +
+    osd("Rapor kaydedildi: " + shortPath(folder) + "/rapor.md" +
       (r.missing ? " (" + r.missing + " SS bulunamadı)" : ""));
   });
   pushState();
@@ -687,6 +724,31 @@ function showFolder() {
   let target = ROOT;
   if (video && file.exists(folderOf(video))) target = folderOf(video);
   try { file.showInFinder(target); } catch (e) { log("finder: " + e); }
+}
+
+// Another notes folder for this window (other windows use it once they are reopened). Unlike Windows, nothing is moved.
+function applyRoot(dir) {
+  try {
+    preferences.set("dataFolder", dir === DEFAULT_ROOT ? "" : dir);
+    preferences.sync();
+  } catch (e) {
+    log("preferences: " + e);
+  }
+  setRoot(configuredRoot());
+  reloadAll();
+  pushState();
+  osd("Not klasörü: " + shortPath(ROOT));
+}
+
+async function chooseRoot() {
+  let dir = null;
+  try {
+    // Resolves with the chosen path; does not resolve at all when the panel is cancelled.
+    dir = await utils.chooseFile("KareNot not klasörünü seç", { chooseDir: true });
+  } catch (e) {
+    log("chooseFile: " + e);
+  }
+  if (typeof dir === "string" && dir.charAt(0) === "/") applyRoot(dir.replace(/\/+$/, "") || "/");
 }
 
 // ---------- Review progress and resume ----------
@@ -736,7 +798,6 @@ function tryResume(attempt) {
 // fails, the old folder stays where it is and the next start tries again (the merge is repeatable).
 
 let migrationMessage = null;   // OSD text, shown when the first video has loaded
-const LOCK = ROOT + "/.tasiniyor";
 
 async function run(cmd, args, quiet) {
   try {
@@ -766,13 +827,14 @@ async function writeChecked(path, content) {
   if (!(await ensureDir(dirName(path)))) return false;
   const tmp = path + ".tmp";
   try {
+    await removeFile(tmp);
     file.write(tmp, content);
   } catch (e) {
     log("write failed for " + tmp + ": " + e);
     return false;
   }
   if (!(await run("/bin/mv", ["-f", tmp, path]))) {
-    try { if (file.exists(tmp)) file.delete(tmp); } catch (e) { /* ignore */ }
+    await removeFile(tmp);
     return false;
   }
   const back = readDisk(path);
@@ -804,7 +866,7 @@ async function takeLock() {
 }
 
 async function releaseLock() {
-  try { if (file.exists(LOCK + "/zaman")) file.delete(LOCK + "/zaman"); } catch (e) { /* ignore */ }
+  await removeFile(LOCK + "/zaman");
   await run("/bin/rmdir", [LOCK], true);
 }
 
@@ -821,7 +883,7 @@ async function migrate() {
     log("migration error: " + e);
   }
   await releaseLock();
-  if (result === "ok") migrationMessage = "KareNot: notlar Masaüstü/KareNot klasörüne taşındı";
+  if (result === "ok") migrationMessage = "KareNot: notlar " + shortPath(ROOT) + " klasörüne taşındı";
   else if (result === "fail") migrationMessage = "KareNot: eski notlar taşınamadı; eski klasör yerinde bırakıldı";
   log("migration: " + result);
 }
@@ -838,12 +900,12 @@ async function migrateLocked() {
     if (e.isDir || !/\.txt$/i.test(e.filename)) continue;
     const text = readDisk(OLD_NOTES_DIR + "/" + e.filename);
     if (text == null) { failed = true; continue; }
-    for (const n of F.parseNotes(text)) { old.push(n); hasFile[n.video] = true; }
+    for (const n of parseNotes(text)) { old.push(n); hasFile[n.video] = true; }
   }
   for (const p of combined) {
     const text = readDisk(p);
     if (text == null) { failed = true; continue; }
-    for (const n of F.parseNotes(text)) if (!hasFile[n.video]) old.push(n);
+    for (const n of parseNotes(text)) if (!hasFile[n.video]) old.push(n);
   }
   const byFile = {};
   for (const n of old) {
@@ -853,7 +915,7 @@ async function migrateLocked() {
   for (const p of Object.keys(byFile)) {
     const current = readDisk(p);
     if (current == null && file.exists(p)) { failed = true; continue; }
-    const m = F.mergeNotes(F.parseNotes(current), byFile[p]);
+    const m = F.mergeNotes(parseNotes(current), byFile[p]);
     if (m.added > 0 && !(await writeChecked(p, F.serialize(m.list)))) failed = true;
   }
   if (failed) return "fail";
@@ -912,10 +974,14 @@ const migration = migrate().catch((e) => log("migration error: " + e));
 
 // ---------- Events ----------
 
+// sidebar.loadFile / overlay.loadFile drop every onMessage handler registered before them (messageHub.clearListeners()
+// in JavascriptAPISidebarView.swift / JavascriptAPIOverlay.swift), so the handlers are registered right after loading.
 event.on("iina.window-loaded", () => {
   windowLoaded = true;
   sidebar.loadFile("ui/sidebar.html");
+  registerSidebarHandlers();
   overlay.loadFile("ui/overlay.html");
+  registerOverlayHandlers();
 });
 
 function onOverlayLoaded() {
@@ -972,56 +1038,60 @@ setInterval(() => {
 
 // ---------- Sidebar messages ----------
 
-sidebar.onMessage("ready", () => pushState());
-sidebar.onMessage("draft", (d) => { draft = d && typeof d.text === "string" ? d.text : ""; });
-sidebar.onMessage("focus", (d) => { inputFocused = !!(d && d.focused); });
-sidebar.onMessage("ss", (d) => {
-  ssEnabled = !!(d && d.enabled);
-  try { preferences.set("ssEnabled", ssEnabled); preferences.sync(); } catch (e) { /* ignore */ }
-});
-sidebar.onMessage("tab", (d) => { if (d && /^(game|edit|keys)$/.test(d.tab)) setTab(d.tab); });
-sidebar.onMessage("add", (d) => {
-  if (!d || F.ALL_KINDS.indexOf(d.kind) < 0) return;
-  if (typeof d.text === "string" && F.isGame(d.kind)) draft = d.text;
-  addNote(d.kind, d.kind === "BIP" && d.text ? d.text : null);
-});
-sidebar.onMessage("select", (d) => { if (d && noteById(d.id)) { selectedId = d.id; pushState(); } });
-sidebar.onMessage("goto", (d) => { const n = d && noteById(d.id); if (n) gotoNote(n); });
-sidebar.onMessage("delete", (d) => { if (d && Array.isArray(d.ids)) removeIds(d.ids); });
-sidebar.onMessage("edit", (d) => { if (d && typeof d.text === "string") updateNote(d.id, { text: F.clean(d.text) }); });
-sidebar.onMessage("status", (d) => {
-  const n = d && noteById(d.id);
-  if (n && F.isGame(n.kind) && F.STATUSES.indexOf(d.value) >= 0) updateNote(d.id, { status: d.value || null });
-});
-sidebar.onMessage("severity", (d) => {
-  const n = d && noteById(d.id);
-  if (n && F.isGame(n.kind) && F.SEVERITIES.indexOf(d.value) >= 0) updateNote(d.id, { severity: d.value || null });
-});
-sidebar.onMessage("bip-end", (d) => {
-  const n = d && noteById(d.id);
-  const p = position();
-  if (!n || n.kind !== "BIP" || p == null) return;
-  if (p <= n.t) { osd("Bitiş, BİP zamanından sonra olmalı"); return; }
-  updateNote(n.id, { end: p });
-});
-sidebar.onMessage("area", () => toggleAreaMode());
-sidebar.onMessage("report", () => writeReport());
-sidebar.onMessage("reviewed", () => markReviewed());
-sidebar.onMessage("loop", () => startLoop());
-sidebar.onMessage("open-folder", () => showFolder());
+function registerSidebarHandlers() {
+  sidebar.onMessage("ready", () => pushState());
+  sidebar.onMessage("draft", (d) => { draft = d && typeof d.text === "string" ? d.text : ""; });
+  sidebar.onMessage("focus", (d) => { inputFocused = !!(d && d.focused); });
+  sidebar.onMessage("ss", (d) => {
+    ssEnabled = !!(d && d.enabled);
+    try { preferences.set("ssEnabled", ssEnabled); preferences.sync(); } catch (e) { /* ignore */ }
+  });
+  sidebar.onMessage("tab", (d) => { if (d && /^(game|edit|keys)$/.test(d.tab)) setTab(d.tab); });
+  sidebar.onMessage("add", (d) => {
+    if (!d || F.ALL_KINDS.indexOf(d.kind) < 0) return;
+    if (typeof d.text === "string" && F.isGame(d.kind)) draft = d.text;
+    addNote(d.kind, d.kind === "BIP" && d.text ? d.text : null);
+  });
+  sidebar.onMessage("select", (d) => { if (d && noteById(d.id)) { selectedId = d.id; pushState(); } });
+  sidebar.onMessage("goto", (d) => { const n = d && noteById(d.id); if (n) gotoNote(n); });
+  sidebar.onMessage("delete", (d) => { if (d && Array.isArray(d.ids)) removeIds(d.ids); });
+  sidebar.onMessage("edit", (d) => { if (d && typeof d.text === "string") updateNote(d.id, { text: F.clean(d.text) }); });
+  sidebar.onMessage("status", (d) => {
+    const n = d && noteById(d.id);
+    if (n && F.isGame(n.kind) && F.STATUSES.indexOf(d.value) >= 0) updateNote(d.id, { status: d.value || null });
+  });
+  sidebar.onMessage("severity", (d) => {
+    const n = d && noteById(d.id);
+    if (n && F.isGame(n.kind) && F.SEVERITIES.indexOf(d.value) >= 0) updateNote(d.id, { severity: d.value || null });
+  });
+  sidebar.onMessage("bip-end", (d) => {
+    const n = d && noteById(d.id);
+    const p = position();
+    if (!n || n.kind !== "BIP" || p == null) return;
+    if (p <= n.t) { osd("Bitiş, BİP zamanından sonra olmalı"); return; }
+    updateNote(n.id, { end: p });
+  });
+  sidebar.onMessage("area", () => toggleAreaMode());
+  sidebar.onMessage("report", () => writeReport());
+  sidebar.onMessage("reviewed", () => markReviewed());
+  sidebar.onMessage("loop", () => startLoop());
+  sidebar.onMessage("open-folder", () => showFolder());
+}
 
 // ---------- Overlay messages ----------
 
-overlay.onMessage("ready", () => onOverlayLoaded());
-overlay.onMessage("rect", (r) => {
-  if (!areaMode || !r) return;
-  const f = toVideoFractions(r);
-  if (!f) { osd("Alan videonun dışında kaldı, tekrar sürükle"); return; }
-  areaRect = f;
-  osd("Alan seçildi: notu yaz, BUG / DEĞİŞİKLİK / NOT seç");
-  pushState();
-});
-overlay.onMessage("cancel", () => { endAreaMode(); osd("Alan işaretleme iptal"); });
+function registerOverlayHandlers() {
+  overlay.onMessage("ready", () => onOverlayLoaded());
+  overlay.onMessage("rect", (r) => {
+    if (!areaMode || !r) return;
+    const f = toVideoFractions(r);
+    if (!f) { osd("Alan videonun dışında kaldı, tekrar sürükle"); return; }
+    areaRect = f;
+    osd("Alan seçildi: notu yaz, BUG / DEĞİŞİKLİK / NOT seç");
+    pushState();
+  });
+  overlay.onMessage("cancel", () => { endAreaMode(); osd("Alan işaretleme iptal"); });
+}
 
 // ---------- Menu (Plugin menu) with key bindings ----------
 
@@ -1055,4 +1125,6 @@ menu.addItem(menu.separator());
 addMenu("Alan işaretle / iptal", null, () => toggleAreaMode());
 addMenu("Bu videonun raporunu kaydet (rapor.md)", null, () => writeReport());
 addMenu("Not klasörünü Finder'da göster", null, () => showFolder());
+addMenu("Not klasörünü seç…", null, () => chooseRoot());
+addMenu("Not klasörünü varsayılana döndür (Masaüstü/KareNot)", null, () => applyRoot(DEFAULT_ROOT));
 addMenu("KareNot panelini göster", null, () => sidebar.show());

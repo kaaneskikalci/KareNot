@@ -244,7 +244,8 @@ sealed partial class MainForm
             SetStatus($"Klip çıkarılıyor: {NoteStore.Fmt(n.T)} (−{settings.ClipBefore:0.#} / +{settings.ClipAfter:0.#} sn)…");
             try
             {
-                var (exit, log) = await Ffmpeg.Clip(path, n.T - settings.ClipBefore, settings.ClipBefore + settings.ClipAfter, output, ct);
+                var (start, duration) = Ffmpeg.ClipRange(n.T, settings.ClipBefore, settings.ClipAfter);
+                var (exit, log) = await Ffmpeg.Clip(path, start, duration, output, ct);
                 if (exit != 0) throw new InvalidOperationException(FfmpegError(log));
             }
             catch
@@ -287,7 +288,8 @@ sealed partial class MainForm
             .ToList();
         if (notes.Count == 0) { SetStatus("Seçilen süzgeçle pakete girecek not yok."); return; }
         var scopeVideo = dlg.AllVideos ? null : currentVideo;
-        var zip = Path.Combine(Paths.ExportDir(scopeVideo), $"KareNot_{(scopeVideo == null ? "tum" : SafeName(scopeVideo))}_{Stamp}.zip");
+        // Two packages in the same minute get the same stamp: the second one gets " (2)" instead of failing.
+        var zip = Paths.Unique(Path.Combine(Paths.ExportDir(scopeVideo), $"KareNot_{(scopeVideo == null ? "tum" : SafeName(scopeVideo))}_{Stamp}.zip"));
         _ = RunExportJob("Bulgu paketi", ct => MakePackage(notes, zip, dlg.IncludeMedia, ct));
     }
 
@@ -327,11 +329,13 @@ sealed partial class MainForm
 
         var progress = new Progress<int>(i => SetStatus($"Bulgu paketi: {i} / {files.Count} dosya…"));
         Directory.CreateDirectory(Path.GetDirectoryName(zipPath));
+        bool created = false;   // only a ZIP made here may be deleted on failure, never an existing file of the same name
         try
         {
             await Task.Run(() =>
             {
                 using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+                created = true;
                 foreach (var (name, text, encoding) in texts)
                 {
                     using var stream = archive.CreateEntry(name, CompressionLevel.Optimal).Open();
@@ -350,7 +354,7 @@ sealed partial class MainForm
         }
         catch
         {
-            try { File.Delete(zipPath); } catch { }
+            if (created) try { File.Delete(zipPath); } catch { }
             throw;
         }
         SetStatus($"Bulgu paketi hazır ({notes.Count} not, {files.Count} dosya): {zipPath}");
@@ -376,6 +380,9 @@ sealed partial class MainForm
         double length = player.LengthMs / 1000.0;
         var outputDir = Paths.ExportDir(currentVideo);
         var output = Path.Combine(outputDir, SafeName(currentVideo) + "_kurgu.mp4");
+        // ffmpeg writes next to it and the result replaces the old video only when it is complete, so a cancelled or failed
+        // run keeps the previous export.
+        var partial = Path.Combine(outputDir, SafeName(currentVideo) + "_kurgu.yaziliyor.mp4");
         return RunExportJob("Kurgu videosu", async ct =>
         {
             SetStatus("Kurgu videosu hazırlanıyor…");
@@ -386,16 +393,19 @@ sealed partial class MainForm
             var extra = (hasAudio ? "" : ", videoda ses yok") + (unpaired > 0 ? $", {unpaired} eşsiz kesim işareti atlandı" : "");
             try
             {
-                var (exit, log) = await Ffmpeg.ApplyEdits2(path, hasAudio, beeps, cuts, length, output,
+                var (exit, log) = await Ffmpeg.ApplyEdits2(path, hasAudio, beeps, cuts, length, partial,
                     t => Ui(() => SetStatus($"Kurgu videosu: %{(outLength > 0 ? Math.Clamp(t / outLength * 100, 0, 100) : 0):0} — " +
                         $"{beeps.Count} bip, {cuts.Count} kesim{extra} (Dışa aktar ▾ > İptal)")), ct);
                 if (exit != 0) throw new InvalidOperationException(FfmpegError(log));
             }
             catch
             {
-                try { File.Delete(output); } catch { }
+                try { File.Delete(partial); } catch { }
                 throw;
             }
+            // The old export may be open in a player: then the new one stays under its temporary name instead of being lost.
+            try { File.Move(partial, output, true); }
+            catch (IOException ex) { throw new IOException($"{ex.Message} Yeni video şurada duruyor: {partial}", ex); }
             SetStatus($"Kurgu videosu hazır ({beeps.Count} bip, {cuts.Count} kesim, {Reports.Duration(outLength)}{extra}): {output}");
             Reveal(output);
         });

@@ -179,6 +179,21 @@ static class Paths
     public static string HtmlReportFile(string video) => Path.Combine(Dir(video), "rapor.html");
     public static string ExportDir(string video) => Path.Combine(Dir(video), "cikti");
 
+    // The path itself when nothing is there yet, else "name (2).ext", "name (3).ext"... so an export never replaces or fails on
+    // an earlier file of the same name.
+    public static string Unique(string path)
+    {
+        if (!File.Exists(path) && !Directory.Exists(path)) return path;
+        var dir = Path.GetDirectoryName(path) ?? "";
+        var name = Path.GetFileNameWithoutExtension(path);
+        var ext = Path.GetExtension(path);
+        for (int i = 2; ; i++)
+        {
+            var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
+            if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+        }
+    }
+
     // Layout before v1.3, moved by Migration: Desktop\Video Notlari\notlar\<video>.txt and one shared ss\; combined files of all
     // notes on the Desktop (old VLC extension) and in the folder (a v1.3 preview).
     public static string OldDir => Path.Combine(Desktop, "Video Notlari");
@@ -197,13 +212,14 @@ sealed class NoteStore
     public readonly List<Note> All = new();
     long orderCounter;
 
+    // hh:mm:ss.s with the tenths floored. Works on whole tenths: t % 60 on a double is not exact (60.3 % 60 is 0.2999...),
+    // which used to show 60.3 s as 00:01:00.2. The small epsilon keeps values read from the file ("60.30") on their tenth.
     public static string Fmt(double t)
     {
-        if (t < 0) t = 0;
-        int h = (int)(t / 3600);
-        int m = (int)(t % 3600 / 60);
-        double s = t % 60;
-        return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00.0}", h, m, Math.Floor(s * 10) / 10);
+        if (!(t > 0)) t = 0;
+        long tenths = (long)Math.Floor(t * 10 + 1e-6);
+        long h = tenths / 36000, m = tenths / 600 % 60, s = tenths / 10 % 60, d = tenths % 10;
+        return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00}.{3}", h, m, s, d);
     }
 
     public static string Clean(string text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
@@ -211,16 +227,48 @@ sealed class NoteStore
     // Identity of a note when merging files (status, severity and media may differ between copies).
     public static string Key(Note n) => string.Join('\t', n.Video, n.T.ToString("0.00", CultureInfo.InvariantCulture), n.Kind, Clean(n.Text));
 
+    // Seconds of a line: the first column ("65.40"; "65,40" from a hand edit), else the time column ("00:01:05.4", "1:05").
+    public static double? ParseSeconds(string seconds, string time)
+    {
+        foreach (var s in new[] { seconds, seconds?.Replace(',', '.') })
+            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var t) && double.IsFinite(t) && t >= 0) return t;
+        return ParseTime(time);
+    }
+
+    // "hh:mm:ss.s", "mm:ss" or "ss" (dot or comma decimals) in seconds, or null.
+    public static double? ParseTime(string text)
+    {
+        var parts = (text ?? "").Trim().Replace(',', '.').Split(':');
+        if (parts.Length is 0 or > 3) return null;
+        double total = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            bool last = i == parts.Length - 1;
+            if (!double.TryParse(parts[i], last ? NumberStyles.AllowDecimalPoint : NumberStyles.None, CultureInfo.InvariantCulture, out var v)) return null;
+            if (i > 0 && v >= 60) return null;
+            total = total * 60 + v;
+        }
+        return total;
+    }
+
+    // Lines of a notes file that can't be read are copied here once instead of being dropped by the next save.
+    public const string UnreadableFile = "notlar_okunamayan.txt";
+
     public static List<Note> ReadFile(string path)
     {
         var result = new List<Note>();
         if (!File.Exists(path)) return result;
+        var unreadable = new List<string>();
         foreach (var line in File.ReadAllLines(path, Utf8))
         {
-            if (line.StartsWith('#') || line.Length == 0) continue;
+            if (line.StartsWith('#') || line.Trim().Length == 0) continue;
             var f = line.Split('\t');
             // Old files have five columns (no screenshot); new ones six.
-            if (f.Length < 5 || !double.TryParse(f[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var t)) continue;
+            if (f.Length < 5 || ParseSeconds(f[0], f[1]) is not double t)
+            {
+                unreadable.Add(line);
+                continue;
+            }
             string Col(int i) => f.Length > i && f[i].Length > 0 ? f[i] : null;
             result.Add(new Note
             {
@@ -235,7 +283,25 @@ sealed class NoteStore
                 Clip = Col(9),
             });
         }
+        if (unreadable.Count > 0 && Path.GetFileName(path).Equals("notlar.txt", StringComparison.OrdinalIgnoreCase)) KeepUnreadable(path, unreadable);
         return result;
+    }
+
+    static void KeepUnreadable(string notesFile, List<string> lines)
+    {
+        try
+        {
+            var file = Path.Combine(Path.GetDirectoryName(notesFile) ?? "", UnreadableFile);
+            var known = File.Exists(file) ? File.ReadAllLines(file, Utf8).ToHashSet() : new HashSet<string>();
+            var add = lines.Where(known.Add).ToList();
+            if (add.Count == 0) return;
+            var header = known.Count == add.Count
+                ? "# KareNot bu satırları okuyamadı (notlar.txt'de sekmeyle ayrılmış en az 5 sütun ve ilk sütunda saniye olmalı).\n" +
+                  "# Düzeltip notlar.txt'ye geri koyabilirsin.\n"
+                : "";
+            File.AppendAllText(file, header + string.Join("\n", add) + "\n", Utf8);
+        }
+        catch (Exception) { }
     }
 
     // Every KareNot\*\notlar.txt (run Migration first).

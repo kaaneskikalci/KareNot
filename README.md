@@ -1,126 +1,182 @@
-<img src="karenot.png" width="96" align="right" alt="KareNot logosu">
+<img src="karenot.png" width="96" align="right" alt="KareNot logo">
 
 # KareNot
 
-Oyun test kayıtlarını (OBS mp4/mkv) izlerken **sorunlu ya da değişmesi gereken yerleri zaman damgasıyla işaretleyip**
-bunları ekip arkadaşlarına, geliştiricilere, AI agent'larına ve video editörüne düzgün bir şekilde iletmek için küçük bir
-Windows uygulaması. KILLSTREAM gibi indie oyunların playtest kayıtları için yazıldı. Mac'te IINA için de bir eklentisi var
-([iina/](iina/README.md)).
+*English · [Türkçe](README.tr.md)*
 
-- **Oyun testi:** bug, değişiklik isteği ve serbest not. İstersen ekran görüntüsü ya da kısa video klibi eklenir, videoda bir
-  alan kırmızı çerçeveyle işaretlenir. Her notun durumu (Açık / Düzeltildi / Tekrar test) ve önemi (Düşük / Orta / Kritik) olur.
-- **Kurgu:** bip (küfür) ve kesim aralıkları. Editöre ya da editör olarak kullandığın bir AI agent'ına makinenin okuyabileceği
-  JSON ve okunur bir liste olarak gider. İstersen uygulama bipli ve kesilmiş videoyu kendisi de çıkarır.
-- **Paylaşım:** Markdown + HTML rapor, agent ve ekip için görev listesi, tek dosyalık bulgu paketi (ZIP), CSV,
-  DaVinci Resolve işaretleri.
+[![CI](https://github.com/kaaneskikalci/KareNot/actions/workflows/ci.yml/badge.svg)](https://github.com/kaaneskikalci/KareNot/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/kaaneskikalci/KareNot)](https://github.com/kaaneskikalci/KareNot/releases)
 
-## Kurulum
+**KareNot** ("frame note" in Turkish) is a Windows tool for reviewing game playtest recordings. While you watch an OBS
+recording you mark bugs and change requests with a timestamp, a screenshot (optionally with the problem area framed in
+red) or a short clip, and hand them over as tasks to teammates and AI coding agents. The same session produces cut notes
+for the video editor: bleeps for swearing and cut ranges, as machine-readable JSON, as DaVinci Resolve markers, or as a
+rendered first cut.
 
-1. **VLC media player (64 bit)** kurulu olmalı: <https://www.videolan.org/vlc/>. Uygulama VLC'nin oynatıcı motorunu kullanır.
-2. [Releases](../../releases) sayfasından `KareNot.exe` dosyasını indir ve çalıştır.
-   - Windows **.NET 10 Desktop Runtime** isterse açılan linkten kur (<https://dotnet.microsoft.com/download/dotnet/10.0>, x64).
-   - SmartScreen uyarısında: *Ek bilgi* → *Yine de çalıştır* (exe imzasız).
-3. İsteğe bağlı: **ffmpeg** (klip, önizleme, bipli/kesilmiş video, ölü an tespiti): `winget install Gyan.FFmpeg`.
-   **whisper.cpp** (küfür adayları, tamamen çevrimdışı): `whisper-cli.exe` ve çok dilli bir ggml modeli
-   (ör. `ggml-small.bin`). Yolları *Araçlar ▾ → Ayarlar* içinden seçilir.
+It was built for the playtests of indie games such as KILLSTREAM. The user interface is in Turkish; the
+[Turkish guide](README.tr.md) has the full walkthrough.
 
-## Kullanım
+> 📷 **Screenshot placeholder** — main window with a recording open, the game test notes on the right and markers on the
+> timeline. Planned file: `docs/images/main-window.png`
+>
+> 🎞️ **GIF placeholder** — drag on the video to frame an area, type a note, press `B`; the note appears in the list with
+> its screenshot. Planned file: `docs/images/add-bug.gif`
 
-Videoyu aç: `Ctrl+O`, **Video aç**, sürükle-bırak ya da exe'ye video dosyasını ver. Açılan video kaldığın yerden devam eder.
-Sağ panelde **Oyun testi | Kurgu | Videolar | Kısayollar** sekmeleri var. Bütün kısayollar her sekmede çalışır; eklenen not
-kendi sekmesini açar. `F1` kısayol listesini gösterir.
+<!-- When the images exist, replace the placeholders above with:
+![Main window](docs/images/main-window.png)
+![Adding a bug with a framed area](docs/images/add-bug.gif)
+-->
 
-**Oyun testi**
-- Videoyu durdur (`Boşluk`), kutuya yaz, türünü seç: **BUG** `B`, **DEĞİŞİKLİK** `D`, **NOT** `N`
-  (kutudayken `Enter` = NOT, `Ctrl+B` / `Ctrl+D`). **Hazır metin ▾** sık yazdığın açıklamaları doldurur; yazarken önceki
-  notlar önerilir.
-- **SS ekle** açıkken o anki kare kaydedilir. **Alan işaretleme:** videoda fareyle sürükle, alan kırmızı çerçeveyle SS'e girer.
-- Seçili nota: `S` SS ekle, `C` kısa klip (varsayılan 5 sn öncesi + 5 sn sonrası), `L` döngüde izle, sağ tık / ⋯ menüsünde
-  durum, önem, **Görev metni olarak kopyala**.
-- Arama ve filtre (`Ctrl+F`): kelime ya da `#kamera` gibi etiketler; "Açık olanlar", "Kritik", "Tekrar test" vb.
+## Features
 
-**Kurgu**
-- `K` bip (basılı tutarsan bıraktığın yere kadar aralık olur), `1` kesim başla, `2` kesim bitir. Kesimler liste ve zaman
-  çubuğunda `02:14–02:38 · 24 sn` gibi aralık olarak görünür; eşi olmayan işaret uyarı verir.
-- `X` kesilmiş hâli izle (kesimleri atlar). *Araçlar ▾* içinde: **küfür adaylarını bul** (Whisper) ve **ölü anları bul**
-  (uzun sessiz / donuk bölümler kesim adayı olur). Adaylar "aday:" yazısıyla eklenir, `Ctrl+Z` hepsini geri alır.
+- **Game test notes** — `BUG`, `DEĞİŞİKLİK` (change request) and `NOT` (note) at the current frame, with a screenshot,
+  a red frame around a dragged area, status (open / fixed / retest), severity (low / medium / critical), `#tags`,
+  search and filters, note templates, undo / redo.
+- **Clips** — a short H.264 clip around a note (default 5 s before and after), made with ffmpeg.
+- **Editing marks** — bleeps (`K`, hold for a range) and cut start / end (`1` / `2`), shown as ranges on the timeline;
+  watch the video with the cuts skipped (`X`).
+- **Assisted editing** — profanity candidates found offline with [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+  and a word list, dead-air candidates (long silent or frozen stretches) found with ffmpeg.
+- **Review workflow** — resume where you stopped, "reviewed up to here", a per-folder video list with progress, build and
+  tester info, jumping between marks, looping around a note, frame preview over the seek bar.
+- **Sharing** — Markdown + HTML report, task list for AI agents and developers, findings package (ZIP), CSV, editing
+  notes (JSON + Markdown), DaVinci Resolve marker EDL, and a bleeped and cut copy of the video.
 
-**Gezinme ve inceleme**
-- `[` `]` ya da `Ctrl+←` `Ctrl+→`: önceki / sonraki işaret. `I`: buraya kadar inceledim. `Home`: baştan.
-- **Videolar** sekmesi klasördeki kayıtları Başlanmadı / Devam ediyor / Tamamlandı olarak gösterir; build ve testçi bilgisi
-  (*Oturum bilgisi…*) raporlara yazılır. Zaman çubuğunun üzerine gelince o anın küçük karesi görünür.
-- `Ctrl+Z` / `Ctrl+Y`: geri al / yinele (silme, düzenleme, durum dahil).
+## Requirements
 
-**Oynatıcı:** `Boşluk` oynat/durdur · `←` `→` 3 sn (`Shift` 10 sn) · `,` `.` kare · `-` `+` hız · `↑` `↓` ses ·
-`Page Up/Down` klasördeki önceki/sonraki video · `F` / `F11` tam ekran · `Tab` paneli gizle.
+| | |
+|---|---|
+| OS | Windows 10 / 11, x64 |
+| Runtime | [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) — Windows offers the download link on first start if it is missing |
+| Player | [VLC media player 64-bit](https://www.videolan.org/vlc/) — KareNot uses the installed VLC's engine (libvlc 3) |
+| Optional | [ffmpeg](https://ffmpeg.org/) for clips, previews, exports and dead-air detection: `winget install Gyan.FFmpeg` |
+| Optional | whisper.cpp `whisper-cli.exe` and a **multilingual** ggml model (e.g. `ggml-small.bin`) for profanity candidates |
 
-## Paylaşım ve dışa aktarma
+## Install
 
-| Ne | Nereden | Kime |
-|----|---------|------|
-| `rapor.md` + `rapor.html` | **Raporu kaydet** (`Ctrl+S`) | Ekip, geliştirici (HTML küçük resimli ve klipli) |
-| Görev listesi `agent_gorevleri_<video>.md` | *Dışa aktar ▾* | AI agent'ları ve geliştiriciler: her açık bulgu için başlık, zaman, önem, SS/klip, Beklenen / Gözlenen / Kabul ölçütü iskeleti |
-| Bulgu paketi (ZIP) | *Dışa aktar ▾* ya da `Ctrl+P` | Tek dosyada rapor, görev listesi, CSV, kurgu notları, SS ve klipler (ör. "yalnız bu videonun açık bugları") |
-| Kurgu notları (JSON + Markdown) | *Dışa aktar ▾* | Editör ya da editör olarak çalışan AI: bip ve kesim aralıkları, notlar |
-| DaVinci Resolve işaretleri (EDL) | *Dışa aktar ▾* | *Timeline → Import → Timeline Markers from EDL* |
-| Bipli ve kesilmiş video | *Dışa aktar ▾* | Kurgunun hızlı ilk hâli (ffmpeg) |
-| CSV | *Dışa aktar ▾* | Excel, Trello, Jira içe aktarma |
+1. Install VLC (64-bit) and, if Windows asks for it, the .NET 10 Desktop Runtime.
+2. Download `KareNot-<version>-win-x64.zip` from [Releases](https://github.com/kaaneskikalci/KareNot/releases), extract it
+   to a folder you can write to (not `Program Files`) and run `KareNot.exe`.
+   The exe is not signed: on the SmartScreen warning choose *More info → Run anyway*.
+   Each release also has the bare `KareNot.exe` (releases up to v1.4 have only that), so
+   [`releases/latest/download/KareNot.exe`](https://github.com/kaaneskikalci/KareNot/releases/latest/download/KareNot.exe)
+   always points to the newest exe.
+3. Optional: set the ffmpeg and whisper paths in *Araçlar ▾ → Ayarlar* (Tools → Settings).
 
-Rapor ve çıktılar açık videonun klasörüne (`KareNot Notlar\<video adı>\`, çıktılar `cikti\` altında) yazılır; birden çok
-videoyu kapsayanlar (tüm videoların raporu, CSV, "Tüm videolar" ZIP'i) `KareNot Notlar\` ve `KareNot Notlar\cikti\` içine.
+Notes are saved in a `KareNot Notlar` folder next to `KareNot.exe` (or `Desktop\KareNot` when that folder is not
+writable). Another folder can be chosen in the settings; KareNot offers to move the existing notes there.
 
-## Dosyalar
+## Quick start
 
-Notlar varsayılan olarak `KareNot.exe`'nin yanındaki **`KareNot Notlar`** klasörüne kaydedilir (exe'yi nereye koyduysan
-orası; oraya yazılamıyorsa, ör. `Program Files`, `Masaüstü\KareNot`). *Araçlar ▾ → Ayarlar → Notların kaydedileceği klasör*
-ile başka bir klasör seçilebilir; değiştirince eski klasördeki notları, SS'leri ve klipleri taşımayı sorar (aynı adlı
-`notlar.txt` ve `inceleme.json` birleştirilir). v1.3'ten kalan `Masaüstü\KareNot` varsa başka klasör seçilene kadar o kullanılır.
+1. Open a recording: `Ctrl+O`, drag and drop it onto the window, or pass it to the exe.
+2. Pause at a problem (`Space`), type what is wrong in the text box and press `B` (bug), `D` (change) or `Enter` (note).
+   To point at something, drag a rectangle on the video first; the screenshot gets a red frame around it.
+3. Select a note and press `C` for a clip, right-click for status and severity.
+4. In the **Kurgu** (editing) tab, press `K` on swearing and `1` / `2` around parts to cut.
+5. Press `Ctrl+S` for the report, or use *Dışa aktar ▾* (Export) for the task list, the ZIP or the editing notes.
 
-Alt çubuktaki **Kayıt dosyası** açık videonun `notlar.txt` dosyasını metin düzenleyicide açar; orada değiştirip kaydedince
-KareNot'a dönüldüğünde notlar yeniden okunur.
+## Keyboard shortcuts
 
-Her video kendi adını taşıyan bir klasörde (uzantısız ad; aynı adlı `.mp4` ve `.mkv` aynı klasörü paylaşır):
+All shortcuts work in every tab; letter shortcuts are ignored while typing in the note or search box. `F1` shows the full
+list inside the app.
 
-| Yer | İçerik |
-|-----|--------|
-| `KareNot Notlar\<video adı>\notlar.txt` | Videonun notları (esas kaynak) |
-| `KareNot Notlar\<video adı>\ss\` | Videonun ekran görüntüleri ve klipleri |
-| `KareNot Notlar\<video adı>\rapor.md`, `rapor.html`, `cikti\` | Videonun raporu ve çıktıları |
-| `KareNot Notlar\inceleme.json` | Kaldığın yer, inceleme durumu, build / testçi (tüm videolar) |
-| `KareNot Notlar\hazir_notlar.txt`, `kufur_listesi.txt` | Düzenlenebilir listeler |
-| `KareNot Notlar\rapor.md`, `rapor.html`, `cikti\` | Tüm videoların raporu ve çok videolu çıktılar |
+| Player | |
+|---|---|
+| `Space` | Play / pause |
+| `←` `→` / `Shift`+`←` `→` | 3 s / 10 s back or forward |
+| `,` `.` | One frame back / forward |
+| `-` `+` | Playback speed (0.25× – 3×) |
+| `↑` `↓`, mouse wheel on the video | Volume |
+| `Page Up` / `Page Down` | Previous / next video in the folder |
+| `F`, `F11`, double-click | Full screen (`Esc` leaves) |
+| `Tab` | Show / hide the side panel |
+| `Home` | Back to the start (a video otherwise resumes where you left it) |
+| `[` `]` or `Ctrl`+`←` `→` | Previous / next mark of the open tab |
+| `L` | Loop around the selected note |
+| `I` | Reviewed up to here (near the end: video done) |
+| `Ctrl+O` | Open a video |
 
-Eski sürümlerin `Masaüstü\Video Notlari\` klasörü (ve `Masaüstü\video_notlari.txt`) ilk açılışta bu düzene taşınır: notlar
-ve SS / klipler videoların klasörlerine, listeler ve `inceleme.json` not klasörüne; eski klasör `Video Notlari (eski)` adıyla
-kalır (eski raporlar ve çıktılar onun içinde). Taşıma kaydı: `KareNot Notlar\tasima_gunlugu.txt`.
+| Game test | |
+|---|---|
+| `B` / `D` / `N` | Add BUG / DEĞİŞİKLİK / NOT (NOT needs text) |
+| In the text box: `Enter`, `Ctrl+B`, `Ctrl+D`, `Ctrl+K` | Add as NOT / BUG / DEĞİŞİKLİK / bleep |
+| Drag on the video | Freeze the frame and frame an area for the next note (`Esc` cancels) |
+| `S` | Add the current frame to the selected note |
+| `C` | Clip around the selected note (ffmpeg) |
+| `Enter` | Pause and jump into the text box |
+| `Ctrl+F` | Search (words or `#tags`) |
 
-Not dosyaları sekmeyle ayrılmış metindir: `saniye  zaman  tür  not  video  ss  durum  önem  bitiş  klip`
-(sondaki boş sütunlar yazılmaz; eski 5–6 sütunlu dosyalar olduğu gibi okunur). IINA eklentisi aynı dosyaları kullanır
-(Mac'te not klasörü şimdilik `Masaüstü\KareNot`).
+| Editing (Kurgu) | |
+|---|---|
+| `K` | Bleep; hold to make a range until you release |
+| `1` / `2` | Cut start / cut end |
+| `X` | Watch with the cuts skipped |
 
-## Test durumu
+| List and files | |
+|---|---|
+| `G`, `Enter`, double-click | Go to the selected note (2 s before) |
+| `F2` | Edit the selected note |
+| `Del` | Delete the selected note (the last one if nothing is selected) |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `Ctrl+S` | Save the report (`rapor.md` + `rapor.html`) |
+| `Ctrl+P` | Findings package (ZIP) |
 
-Otomatik test (`--selftest`) oynatıcıyı, not alma ve alan işaretlemeyi, sekmeleri, kesim aralıklarını, geri al / yinele,
-durum / önem / filtre / aramayı, dosya biçimini ve raporları kapsar; v1.2 ile geçti. Whisper ile küfür adayı bulma gerçek
-bir ses kaydıyla denendi. **Henüz denenmedi:**
+## Files and export formats
 
-- IINA eklentisi (Mac'te hiç çalıştırılmadı).
-- *Dışa aktar ▾* ve *Araçlar ▾* işlemlerinin uygulama içinden kullanımı: bulgu paketi (ZIP), klip çıkarma, bipli ve kesilmiş
-  video, görev listesi, kurgu notları, CSV, Resolve EDL, Ayarlar penceresi. Bunların ffmpeg / dosya tarafı ayrıca
-  denendi, menüden tıklanarak denenmedi. DaVinci Resolve'a EDL içe aktarma da denenmedi.
-- Ayarlar'dan not klasörünü değiştirip taşıma ve *Kayıt dosyası* düğmesi elle denenmedi (taşıma ve dışarıda değişen
-  `notlar.txt`'nin yeniden okunması otomatik testte denendi).
-- %100'den büyük ekran ölçeklemesi.
-- Eski `Video Notlari` klasörünün taşınması gerçek verilerle (yalnız otomatik testte hazırlanan örnekle denendi).
-
-## Kaynaktan derleme
-
-.NET 10 SDK ile:
+Every video gets its own folder, named after the video file without its extension:
 
 ```
-dotnet publish -c Release -o yayin
+KareNot Notlar\
+  inceleme.json                 resume position, review progress, build, tester (all videos)
+  hazir_notlar.txt              note templates (editable)
+  kufur_listesi.txt             words that make a bleep candidate (editable)
+  <video name>\
+    notlar.txt                  the notes of this video (source of truth)
+    ss\                         screenshots and clips
+    rapor.md, rapor.html        report
+    cikti\                      exports
 ```
 
-Çıktı: `yayin\KareNot.exe` (framework-dependent, tek dosya).
-Test modu: `KareNot.exe --selftest <log dosyası> <video>` (veri klasörü için `VIDEONOTLARI_DATA` ortam değişkeni; aynı
-klasörde ikinci bir video olmalı; test fareyi kısa süre hareket ettirir).
+| Output | Where | Format |
+|---|---|---|
+| Notes | `<video>\notlar.txt` | UTF-8, tab-separated: `seconds  time  kind  note  video  screenshot  status  severity  end  clip`. Trailing empty columns are omitted; old 5- and 6-column files are read as they are. The first column (seconds, `.` decimals) is authoritative. Lines KareNot can't read are copied to `notlar_okunamayan.txt` instead of being dropped. |
+| Report | `Ctrl+S` → `<video>\rapor.md` and `rapor.html` | Markdown and a self-contained dark HTML page with thumbnails and clips, grouped by kind |
+| Task list | *Export → Görev listesi* → `cikti\agent_gorevleri_<video>.md` | One Markdown section per open game note: video, time, severity, status, build / tester, screenshot and clip links and absolute paths, and *Expected / Observed / Acceptance criteria* stubs |
+| Findings package | `Ctrl+P` → `cikti\KareNot_<scope>_<yyyyMMdd_HHmm>.zip` | Report, CSV, task list, editing notes and the screenshots / clips, filtered by video, game notes only, open only |
+| Editing notes | *Export → Kurgu notları* → `cikti\kurgu_notlari_<video>.json` + `.md` | JSON with `video`, `path`, `length_s`, `fps`, `bleeps[{start,end,text}]`, `cuts[{start,end,duration,text}]`, `cut_total_s`, `unpaired_cut_marks`, `notes`; times in seconds from the start |
+| Resolve markers | *Export → DaVinci Resolve* → `cikti\<video>_isaretler.edl` | CMX-style marker EDL for *Timeline → Import → Timeline Markers from EDL*, timeline starting at 01:00:00:00, colored by kind |
+| CSV | *Export → CSV* → `KareNot Notlar\cikti\KareNot_notlar_<stamp>.csv` | `;`-separated, UTF-8 with BOM, decimal comma (Turkish Excel); text starting with `=`, `+`, `@`, `-` is defused |
+| Edited video | *Export → Bipli ve kesilmiş video* → `cikti\<video>_kurgu.mp4` | H.264 / AAC copy with 1 kHz bleeps over the bleep ranges and the paired cuts removed (ffmpeg trim + concat) |
+
+## macOS: IINA plugin (EXPERIMENTAL, untested)
+
+> ⚠️ **Experimental.** The IINA plugin has **never been run on a Mac**. Do not rely on it for notes you care about yet.
+
+[`iina/`](iina/README.md) contains a plugin for the [IINA](https://iina.io) player that reads and writes the same note
+format and folder layout. Its notes folder defaults to `~/Desktop/KareNot` and can be changed from the plugin menu
+(*Not klasörünü seç…*); to share notes with Windows, point both apps at the same synced folder. The pure format code is
+covered by `node iina/test/format_test.js` (run in CI). The issues found by a static review against IINA's source
+(message handlers cleared by `loadFile`, `file.delete` / overwrite limits, message escaping, NFD file names) have been
+fixed and smoke-tested against a fake IINA API only; whether the plugin works in IINA is unverified.
+
+## Testing status
+
+- Unit tests (xUnit, `tests/KareNot.Tests`) cover the note file format, time formatting, folder naming, cut / clip range
+  math, every export format, the settings file, `inceleme.json` handling, whisper output parsing and the notes folder move.
+  They run on every push in GitHub Actions (Windows).
+- `KareNot.exe --selftest <log> <video>` drives the real window and player (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+- Not yet tried by hand: the export and tools menus end to end, changing the notes folder from the settings, display
+  scaling above 100%, the IINA plugin (experimental, never run on a Mac).
+
+## Building from source
+
+```bash
+dotnet publish KareNot.csproj -c Release -o yayin
+```
+
+Output: `yayin\KareNot.exe` (framework-dependent single file). Tests: `dotnet test tests/KareNot.Tests`. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for details and the release process, and [CHANGELOG.md](CHANGELOG.md) for the history.
+
+## License
+
+KareNot is released under the [MIT License](LICENSE). © 2026 Kaan Eskikalci.

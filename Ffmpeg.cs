@@ -79,6 +79,15 @@ static partial class Ffmpeg
 
     static string S(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
 
+    // Start and length of a clip from `before` seconds before t to `after` seconds after it. Near the start of the video the
+    // clip starts at 0 and gets shorter, so it still ends `after` seconds after the note.
+    public static (double Start, double Duration) ClipRange(double t, double before, double after)
+    {
+        t = Math.Max(0, t);
+        double start = Math.Max(0, t - Math.Max(0, before));
+        return (start, Math.Max(0.1, t + Math.Max(0, after) - start));
+    }
+
     // Short H.264 clip around a moment.
     public static Task<(int Exit, string Log)> Clip(string video, double start, double duration, string output, CancellationToken cancel = default) =>
         Run(new[] { "-y", "-ss", S(Math.Max(0, start)), "-i", video, "-t", S(duration), "-map", "0:v:0", "-map", "0:a:0?",

@@ -66,13 +66,14 @@ function pad(n, width) {
   return s;
 }
 
-// hh:mm:ss.s with the tenths floored, like NoteStore.Fmt (e.g. 65.49 -> 00:01:05.4).
+// hh:mm:ss.s with the tenths floored, like NoteStore.Fmt (e.g. 65.49 -> 00:01:05.4). Works on whole tenths:
+// t % 60 is not exact (60.3 % 60 is 0.2999...), which used to show 60.3 s as 00:01:00.2. The small epsilon keeps
+// values read from the file ("60.30") on their tenth.
 function fmt(t) {
-  if (!(t > 0)) t = 0;
-  const h = Math.floor(t / 3600);
-  const m = Math.floor((t % 3600) / 60);
-  const s = Math.floor((t % 60) * 10) / 10;
-  return pad(h, 2) + ":" + pad(m, 2) + ":" + pad(s.toFixed(1), 4);
+  if (!(t > 0) || !isFinite(t)) t = 0;
+  const tenths = Math.floor(t * 10 + 1e-6);
+  const h = Math.floor(tenths / 36000), m = Math.floor(tenths / 600) % 60, s = Math.floor(tenths / 10) % 60;
+  return pad(h, 2) + ":" + pad(m, 2) + ":" + pad(s, 2) + "." + (tenths % 10);
 }
 
 // hh:mm:ss (seconds floored), used for the cut ranges in the Kurgu list.
@@ -139,6 +140,19 @@ function videoFolderName(video) {
 // Folder names are compared ignoring case (Windows and default macOS volumes do).
 function sameFolderName(a, b) {
   return String(a).normalize("NFC").toUpperCase() === String(b).normalize("NFC").toUpperCase();
+}
+
+// macOS may hand over file names decomposed (NFD: "ğ" as g + breve) while Windows writes them composed (NFC); video
+// names are compared and written in NFC so Turkish-named videos match their notes on both systems.
+function nfc(s) {
+  return s == null ? s : String(s).normalize("NFC");
+}
+
+// IINA passes an object message to a webview as String.raw`<JSON>` (JavascriptMessageHub.swift), where a backtick ends
+// the string and "${" starts a substitution. This returns the JSON text with "`" and "$" written as \u escapes; send it
+// as a string field and JSON.parse it in the webview.
+function webviewJson(value) {
+  return JSON.stringify(value).replace(/`/g, "\\u0060").replace(/\$/g, "\\u0024");
 }
 
 // Same note: same video, kind, text and seconds as written in the file (two decimals).
@@ -350,6 +364,6 @@ function parseReview(text) {
 module.exports = {
   HEADER, GAME_KINDS, EDIT_KINDS, ALL_KINDS, STATUSES, STATUS_LABELS, SEVERITIES, SEVERITY_LABELS,
   isEdit, isGame, label, color, reportTitle, pad, fmt, fmtShort, num2, clean, parseNum, safeFileName,
-  videoFolderName, sameFolderName, noteKey, mergeNotes, mergeReview, findShot,
+  videoFolderName, sameFolderName, nfc, webviewJson, noteKey, mergeNotes, mergeReview, findShot,
   parseNotes, noteLine, serialize, sortNotes, cuts, escapeDataString, buildReport, shotName, parseReview,
 };

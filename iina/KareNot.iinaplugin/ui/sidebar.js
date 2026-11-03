@@ -251,7 +251,12 @@
     renderList("list-edit", state.edit, false);
   }
 
-  bridge.onMessage("state", (s) => {
+  // main.js sends the state as JSON text in d.json (see F.webviewJson); the stub below passes the object itself.
+  bridge.onMessage("state", (d) => {
+    let s = d;
+    if (d && typeof d.json === "string") {
+      try { s = JSON.parse(d.json); } catch (e) { return; }
+    }
     if (!s) return;
     state = s;
     render();

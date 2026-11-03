@@ -17,7 +17,13 @@
     <ApplicationIcon>karenot.ico</ApplicationIcon>
     <InvariantGlobalization>false</InvariantGlobalization>
     <DebugType>none</DebugType>
+    <!-- The test project lives below this folder; keep its sources out of the app. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests/**;yayin/**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KareNot.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="karenot.png" LogicalName="KareNot.karenot.png" />
