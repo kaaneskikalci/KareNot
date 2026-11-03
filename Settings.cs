@@ -24,8 +24,30 @@ sealed class AppSettings
 
     public static AppSettings Load()
     {
-        try { return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings(); }
+        try { return Parse(File.ReadAllText(FilePath)); }
         catch { return new AppSettings(); }
+    }
+
+    // A hand-edited file may hold null strings or nonsense numbers; those fall back to the defaults (a null DataFolder used to
+    // crash every start in Paths.Init).
+    public static AppSettings Parse(string json)
+    {
+        AppSettings s;
+        try { s = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings(); }
+        catch (Exception) { return new AppSettings(); }
+        var d = new AppSettings();
+        static double Num(double v, double fallback) => double.IsFinite(v) && v >= 0 ? v : fallback;
+        s.ClipBefore = Num(s.ClipBefore, d.ClipBefore);
+        s.ClipAfter = Num(s.ClipAfter, d.ClipAfter);
+        s.LoopBefore = Num(s.LoopBefore, d.LoopBefore);
+        s.LoopAfter = Num(s.LoopAfter, d.LoopAfter);
+        s.BeepDefault = s.BeepDefault > 0 && double.IsFinite(s.BeepDefault) ? s.BeepDefault : d.BeepDefault;
+        s.DeadAirMin = s.DeadAirMin > 0 && double.IsFinite(s.DeadAirMin) ? s.DeadAirMin : d.DeadAirMin;
+        s.FfmpegPath ??= "";
+        s.WhisperPath ??= "";
+        s.WhisperModel ??= "";
+        s.DataFolder ??= "";
+        return s;
     }
 
     public void Save()
