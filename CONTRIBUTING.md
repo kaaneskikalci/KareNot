@@ -10,7 +10,7 @@ Thanks for helping. KareNot is a small Windows Forms app; this page covers build
 | `MainForm*.cs` | The main window, split by feature: review, export, analysis, self test |
 | `Notes.cs`, `Settings.cs`, `Reports.cs`, `Ffmpeg.cs`, `Whisper.cs` | File format, storage, exports and tool wrappers — the testable logic |
 | `tests/KareNot.Tests/` | xUnit tests for that logic |
-| `iina/` | IINA plugin for macOS (untested on a Mac) and its node format tests |
+| `iina/` | Experimental IINA plugin for macOS (never run on a Mac) and its node format tests |
 | `.github/workflows/` | CI (`ci.yml`) and releases (`release.yml`) |
 
 ## Prerequisites

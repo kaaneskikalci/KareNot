@@ -6,8 +6,8 @@
 
 Oyun test kayıtlarını (OBS mp4/mkv) izlerken **sorunlu ya da değişmesi gereken yerleri zaman damgasıyla işaretleyip**
 bunları ekip arkadaşlarına, geliştiricilere, AI agent'larına ve video editörüne düzgün bir şekilde iletmek için küçük bir
-Windows uygulaması. KILLSTREAM gibi indie oyunların playtest kayıtları için yazıldı. Mac'te IINA için de bir eklentisi var
-([iina/](iina/README.md)).
+Windows uygulaması. KILLSTREAM gibi indie oyunların playtest kayıtları için yazıldı. Mac'te IINA için de **deneysel**
+bir eklentisi var ([iina/](iina/README.md)); Mac'te hiç denenmedi.
 
 - **Oyun testi:** bug, değişiklik isteği ve serbest not. İstersen ekran görüntüsü ya da kısa video klibi eklenir, videoda bir
   alan kırmızı çerçeveyle işaretlenir. Her notun durumu (Açık / Düzeltildi / Tekrar test) ve önemi (Düşük / Orta / Kritik) olur.
@@ -102,8 +102,9 @@ Not dosyaları sekmeyle ayrılmış metindir: `saniye  zaman  tür  not  video  
 (sondaki boş sütunlar yazılmaz; eski 5–6 sütunlu dosyalar olduğu gibi okunur). Esas olan ilk sütundaki saniyedir
 (virgüllü `65,4` da olur; okunamazsa `zaman` sütunu kullanılır). Elle düzenlemede okunamayan satırlar silinmez, aynı
 klasördeki `notlar_okunamayan.txt` dosyasına kopyalanır. Okunamayan bir `inceleme.json` üzerine yazılmaz; bozuksa
-`inceleme.json.bozuk-<zaman>` olarak saklanıp yenisi başlatılır. IINA eklentisi aynı dosyaları kullanır
-(Mac'te not klasörü şimdilik `Masaüstü\KareNot`).
+`inceleme.json.bozuk-<zaman>` olarak saklanıp yenisi başlatılır. **Deneysel** IINA eklentisi
+aynı biçimi ve klasör düzenini kullanır; Mac'te not klasörü varsayılan olarak `~/Desktop/KareNot`, eklenti menüsündeki
+*Not klasörünü seç…* ile değiştirilir. Notları Windows'la paylaşmak için iki tarafta aynı (eşitlenen) klasörü seç.
 
 ## Test durumu
 
@@ -115,7 +116,8 @@ Otomatik test (`--selftest`) oynatıcıyı, not alma ve alan işaretlemeyi, sekm
 durum / önem / filtre / aramayı, dosya biçimini ve raporları kapsar; v1.2 ile geçti. Whisper ile küfür adayı bulma gerçek
 bir ses kaydıyla denendi. **Henüz denenmedi:**
 
-- IINA eklentisi (Mac'te hiç çalıştırılmadı).
+- IINA eklentisi (**deneysel**, Mac'te hiç çalıştırılmadı). IINA'nın kaynak koduna göre yapılan inceleme sonrası
+  düzeltmeler yalnızca sahte bir IINA API'siyle denendi.
 - *Dışa aktar ▾* ve *Araçlar ▾* işlemlerinin uygulama içinden kullanımı: bulgu paketi (ZIP), klip çıkarma, bipli ve kesilmiş
   video, görev listesi, kurgu notları, CSV, Resolve EDL, Ayarlar penceresi. Bunların ffmpeg / dosya tarafı ayrıca
   denendi, menüden tıklanarak denenmedi. DaVinci Resolve'a EDL içe aktarma da denenmedi.

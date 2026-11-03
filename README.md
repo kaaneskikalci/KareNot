@@ -148,12 +148,16 @@ KareNot Notlar\
 | CSV | *Export → CSV* → `KareNot Notlar\cikti\KareNot_notlar_<stamp>.csv` | `;`-separated, UTF-8 with BOM, decimal comma (Turkish Excel); text starting with `=`, `+`, `@`, `-` is defused |
 | Edited video | *Export → Bipli ve kesilmiş video* → `cikti\<video>_kurgu.mp4` | H.264 / AAC copy with 1 kHz bleeps over the bleep ranges and the paired cuts removed (ffmpeg trim + concat) |
 
-## macOS: IINA plugin (untested)
+## macOS: IINA plugin (EXPERIMENTAL, untested)
+
+> ⚠️ **Experimental.** The IINA plugin has **never been run on a Mac**. Do not rely on it for notes you care about yet.
 
 [`iina/`](iina/README.md) contains a plugin for the [IINA](https://iina.io) player that reads and writes the same note
-files. **It has never been run on a Mac.** Its pure format code is covered by `node iina/test/format_test.js` (run in CI),
-but the IINA integration is unverified, and a static review found likely blocking issues (see the open items in
-[CHANGELOG.md](CHANGELOG.md)). Treat it as a prototype.
+format and folder layout. Its notes folder defaults to `~/Desktop/KareNot` and can be changed from the plugin menu
+(*Not klasörünü seç…*); to share notes with Windows, point both apps at the same synced folder. The pure format code is
+covered by `node iina/test/format_test.js` (run in CI). The issues found by a static review against IINA's source
+(message handlers cleared by `loadFile`, `file.delete` / overwrite limits, message escaping, NFD file names) have been
+fixed and smoke-tested against a fake IINA API only; whether the plugin works in IINA is unverified.
 
 ## Testing status
 
@@ -162,7 +166,7 @@ but the IINA integration is unverified, and a static review found likely blockin
   They run on every push in GitHub Actions (Windows).
 - `KareNot.exe --selftest <log> <video>` drives the real window and player (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 - Not yet tried by hand: the export and tools menus end to end, changing the notes folder from the settings, display
-  scaling above 100%, the IINA plugin.
+  scaling above 100%, the IINA plugin (experimental, never run on a Mac).
 
 ## Building from source
 

@@ -36,12 +36,23 @@ versions are the Git tags (`v1.4`, …) that the release workflow builds.
 - Releases built by the workflow ship a ZIP (`KareNot.exe`, README, CHANGELOG) with a SHA-256 checksum. The bare
   `KareNot.exe` is still attached, so `releases/latest/download/KareNot.exe` links keep working.
 
+### IINA plugin (experimental, unverified on a Mac)
+- Fixed from a static review against IINA's source; only smoke-tested against a fake IINA API, never in IINA:
+  - the sidebar and overlay message handlers were registered before `loadFile`, which clears them, so the panel did
+    nothing; they are now registered right after it;
+  - `file.delete` and overwriting `file.write` only work under `@tmp` / `@data`, so deleting a video's last note,
+    removing stale `.tmp` files and releasing the migration lock failed; these now use `/bin/rm` and a fresh `.tmp`
+    moved into place with `/bin/mv`;
+  - a backtick or `${` in a note or video name broke the sidebar state message;
+  - video names from macOS (NFD) did not match notes written on Windows (NFC);
+  - a note could be saved under the next video if the file changed while its screenshot was taken;
+  - `fmt` had the same tenth-of-a-second rounding bug as the Windows app.
+- Added *Not klasörünü seç…* / *Not klasörünü varsayılana döndür* to choose the notes folder (default stays
+  `~/Desktop/KareNot`, so a synced Windows `KareNot Notlar` folder can be shared).
+
 ### Known issues
-- The IINA plugin (`iina/`) has never been run on a Mac. A static review found likely blocking problems: the sidebar
-  and overlay message handlers are registered before `loadFile`, which clears them; `file.delete` and overwriting
-  `file.write` only work under `@tmp` / `@data`, so deleting a video's last note, cleaning up `.tmp` files and releasing
-  the migration lock fail; and the plugin always uses `~/Desktop/KareNot` while Windows now defaults to the folder next
-  to the exe. Its `fmt` has the same tenth-of-a-second rounding bug that was fixed in the Windows app.
+- The IINA plugin (`iina/`) has never been run on a Mac. Single-letter key bindings may lose to mpv's own bindings, and
+  the open points in `iina/README.md` are still unverified.
 
 ## [1.4] - 2026-10-28
 ### Changed
