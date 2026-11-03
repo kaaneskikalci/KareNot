@@ -1704,7 +1704,10 @@ sealed partial class MainForm : Form
     protected override void OnKeyPress(KeyPressEventArgs e)
     {
         base.OnKeyPress(e);
-        if (Typing || ModifierKeys.HasFlag(Keys.Control) || ModifierKeys.HasFlag(Keys.Alt)) return;
+        // AltGr arrives as Ctrl+Alt: on a Turkish Q keyboard [ and ] are AltGr+8 / AltGr+9, so a character typed with both is
+        // still a shortcut; Ctrl or Alt alone is not.
+        var modifiers = ModifierKeys & (Keys.Control | Keys.Alt);
+        if (Typing || modifiers is Keys.Control or Keys.Alt) return;
         e.Handled = true;
         switch (char.ToLowerInvariant(e.KeyChar))
         {
