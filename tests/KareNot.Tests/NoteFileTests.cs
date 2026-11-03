@@ -104,4 +104,53 @@ public class NoteFileTests
         Assert.Null(NoteStore.FindMedia(dir, null, true));
         Assert.Null(NoteStore.FindMedia(Path.Combine(dir, "yok"), "bug_a.png", true));
     }
+
+    [Theory]
+    [InlineData("65.40", "", 65.4)]
+    [InlineData("65,40", "", 65.4)]               // decimal comma from a hand edit
+    [InlineData("", "00:01:05.4", 65.4)]
+    [InlineData("x", "1:05", 65.0)]
+    [InlineData("x", "01:02:03,5", 3723.5)]
+    [InlineData("x", "1:75", null)]
+    [InlineData("x", "a:b", null)]
+    [InlineData("-3", "", null)]
+    [InlineData("NaN", "", null)]
+    public void ParseSeconds_reads_the_seconds_or_the_time_column(string seconds, string time, double? expected)
+    {
+        Assert.Equal(expected, NoteStore.ParseSeconds(seconds, time));
+    }
+
+    [Fact]
+    public void Hand_edited_lines_with_a_comma_or_only_a_time_are_read()
+    {
+        using var data = new TempData();
+        var path = Path.Combine(data.Dir, "notlar.txt");
+        File.WriteAllText(path, "65,4\t\tBUG\tvirgül\toyun.mp4\n\t00:02:00.0\tNOT\tsadece zaman\toyun.mp4\n");
+        Assert.Equal(new[] { 65.4, 120.0 }, NoteStore.ReadFile(path).Select(n => n.T));
+    }
+
+    [Fact]
+    public void Unreadable_lines_are_kept_in_a_side_file_once()
+    {
+        // Regression: such lines were skipped silently and the next save of the video removed them for good.
+        using var data = new TempData();
+        var path = Path.Combine(data.Dir, "notlar.txt");
+        File.WriteAllText(path, "# başlık\n12.00\t00:00:12.0\tNOT\tiyi\toyun.mp4\nbozuk satır\nyarım\tsatır\n   \n");
+
+        Assert.Single(NoteStore.ReadFile(path));
+        NoteStore.ReadFile(path);   // read again (window activated): no duplicates
+
+        var side = File.ReadAllLines(Path.Combine(data.Dir, NoteStore.UnreadableFile));
+        Assert.Equal(new[] { "bozuk satır", "yarım\tsatır" }, side.Where(l => !l.StartsWith('#')));
+    }
+
+    [Fact]
+    public void Other_files_do_not_get_a_side_file()
+    {
+        using var data = new TempData();
+        var path = Path.Combine(data.Dir, "video_notlari.txt");
+        File.WriteAllText(path, "bozuk\n");
+        Assert.Empty(NoteStore.ReadFile(path));
+        Assert.False(File.Exists(Path.Combine(data.Dir, NoteStore.UnreadableFile)));
+    }
 }

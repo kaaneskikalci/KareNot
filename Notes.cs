@@ -227,16 +227,48 @@ sealed class NoteStore
     // Identity of a note when merging files (status, severity and media may differ between copies).
     public static string Key(Note n) => string.Join('\t', n.Video, n.T.ToString("0.00", CultureInfo.InvariantCulture), n.Kind, Clean(n.Text));
 
+    // Seconds of a line: the first column ("65.40"; "65,40" from a hand edit), else the time column ("00:01:05.4", "1:05").
+    public static double? ParseSeconds(string seconds, string time)
+    {
+        foreach (var s in new[] { seconds, seconds?.Replace(',', '.') })
+            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var t) && double.IsFinite(t) && t >= 0) return t;
+        return ParseTime(time);
+    }
+
+    // "hh:mm:ss.s", "mm:ss" or "ss" (dot or comma decimals) in seconds, or null.
+    public static double? ParseTime(string text)
+    {
+        var parts = (text ?? "").Trim().Replace(',', '.').Split(':');
+        if (parts.Length is 0 or > 3) return null;
+        double total = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            bool last = i == parts.Length - 1;
+            if (!double.TryParse(parts[i], last ? NumberStyles.AllowDecimalPoint : NumberStyles.None, CultureInfo.InvariantCulture, out var v)) return null;
+            if (i > 0 && v >= 60) return null;
+            total = total * 60 + v;
+        }
+        return total;
+    }
+
+    // Lines of a notes file that can't be read are copied here once instead of being dropped by the next save.
+    public const string UnreadableFile = "notlar_okunamayan.txt";
+
     public static List<Note> ReadFile(string path)
     {
         var result = new List<Note>();
         if (!File.Exists(path)) return result;
+        var unreadable = new List<string>();
         foreach (var line in File.ReadAllLines(path, Utf8))
         {
-            if (line.StartsWith('#') || line.Length == 0) continue;
+            if (line.StartsWith('#') || line.Trim().Length == 0) continue;
             var f = line.Split('\t');
             // Old files have five columns (no screenshot); new ones six.
-            if (f.Length < 5 || !double.TryParse(f[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var t)) continue;
+            if (f.Length < 5 || ParseSeconds(f[0], f[1]) is not double t)
+            {
+                unreadable.Add(line);
+                continue;
+            }
             string Col(int i) => f.Length > i && f[i].Length > 0 ? f[i] : null;
             result.Add(new Note
             {
@@ -251,7 +283,25 @@ sealed class NoteStore
                 Clip = Col(9),
             });
         }
+        if (unreadable.Count > 0 && Path.GetFileName(path).Equals("notlar.txt", StringComparison.OrdinalIgnoreCase)) KeepUnreadable(path, unreadable);
         return result;
+    }
+
+    static void KeepUnreadable(string notesFile, List<string> lines)
+    {
+        try
+        {
+            var file = Path.Combine(Path.GetDirectoryName(notesFile) ?? "", UnreadableFile);
+            var known = File.Exists(file) ? File.ReadAllLines(file, Utf8).ToHashSet() : new HashSet<string>();
+            var add = lines.Where(known.Add).ToList();
+            if (add.Count == 0) return;
+            var header = known.Count == add.Count
+                ? "# KareNot bu satırları okuyamadı (notlar.txt'de sekmeyle ayrılmış en az 5 sütun ve ilk sütunda saniye olmalı).\n" +
+                  "# Düzeltip notlar.txt'ye geri koyabilirsin.\n"
+                : "";
+            File.AppendAllText(file, header + string.Join("\n", add) + "\n", Utf8);
+        }
+        catch (Exception) { }
     }
 
     // Every KareNot\*\notlar.txt (run Migration first).
