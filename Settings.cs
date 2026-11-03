@@ -45,13 +45,24 @@ static class ReviewStore
 {
     static JsonObject root;
 
+    // The file as read, or null while it exists but can't be read (locked by another program, a cloud placeholder offline):
+    // then reads give defaults, writes are skipped and the next access tries again, so the other videos' progress is never
+    // replaced by an empty file. A file that is not a JSON object is kept as inceleme.json.bozuk-<time> and started over.
     static JsonObject Root
     {
         get
         {
             if (root != null) return root;
-            try { root = JsonNode.Parse(File.ReadAllText(Paths.ReviewFile)) as JsonObject; } catch { }
-            return root ??= new JsonObject();
+            var path = Paths.ReviewFile;
+            if (!File.Exists(path)) return root = new JsonObject();
+            string text;
+            try { text = File.ReadAllText(path); }
+            catch (Exception) { return null; }
+            try { root = JsonNode.Parse(text) as JsonObject; } catch (Exception) { }
+            if (root != null) return root;
+            try { File.Copy(path, $"{path}.bozuk-{DateTime.Now:yyyyMMdd_HHmmss}", true); }
+            catch (Exception) { return null; }
+            return root = new JsonObject();
         }
     }
 
@@ -59,10 +70,12 @@ static class ReviewStore
 
     static JsonObject Entry(string video, bool create)
     {
-        if (Root[video] is JsonObject e) return e;
+        var r = Root;
+        if (r == null) return null;
+        if (r[video] is JsonObject e) return e;
         if (!create) return null;
         e = new JsonObject();
-        Root[video] = e;
+        r[video] = e;
         return e;
     }
 
@@ -78,25 +91,21 @@ static class ReviewStore
 
     public static void Set(string video, string key, JsonNode value)
     {
-        if (string.IsNullOrEmpty(video)) return;
-        Entry(video, true)[key] = value;
+        if (string.IsNullOrEmpty(video) || Entry(video, true) is not JsonObject e) return;
+        e[key] = value;
         Save();
     }
 
-    public static void SetPosition(string video, double seconds)
-    {
-        var e = Entry(video, true);
-        e["pos"] = Math.Round(seconds, 2);
-        Save();
-    }
+    public static void SetPosition(string video, double seconds) => Set(video, "pos", Math.Round(seconds, 2));
 
     static void Save()
     {
+        if (root == null) return;
         try
         {
             Directory.CreateDirectory(Paths.Root);
             var tmp = Paths.ReviewFile + ".tmp";
-            File.WriteAllText(tmp, Root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+            File.WriteAllText(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
             File.Move(tmp, Paths.ReviewFile, true);
         }
         catch { }
