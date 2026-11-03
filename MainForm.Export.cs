@@ -288,7 +288,8 @@ sealed partial class MainForm
             .ToList();
         if (notes.Count == 0) { SetStatus("Seçilen süzgeçle pakete girecek not yok."); return; }
         var scopeVideo = dlg.AllVideos ? null : currentVideo;
-        var zip = Path.Combine(Paths.ExportDir(scopeVideo), $"KareNot_{(scopeVideo == null ? "tum" : SafeName(scopeVideo))}_{Stamp}.zip");
+        // Two packages in the same minute get the same stamp: the second one gets " (2)" instead of failing.
+        var zip = Paths.Unique(Path.Combine(Paths.ExportDir(scopeVideo), $"KareNot_{(scopeVideo == null ? "tum" : SafeName(scopeVideo))}_{Stamp}.zip"));
         _ = RunExportJob("Bulgu paketi", ct => MakePackage(notes, zip, dlg.IncludeMedia, ct));
     }
 
@@ -328,11 +329,13 @@ sealed partial class MainForm
 
         var progress = new Progress<int>(i => SetStatus($"Bulgu paketi: {i} / {files.Count} dosya…"));
         Directory.CreateDirectory(Path.GetDirectoryName(zipPath));
+        bool created = false;   // only a ZIP made here may be deleted on failure, never an existing file of the same name
         try
         {
             await Task.Run(() =>
             {
                 using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+                created = true;
                 foreach (var (name, text, encoding) in texts)
                 {
                     using var stream = archive.CreateEntry(name, CompressionLevel.Optimal).Open();
@@ -351,7 +354,7 @@ sealed partial class MainForm
         }
         catch
         {
-            try { File.Delete(zipPath); } catch { }
+            if (created) try { File.Delete(zipPath); } catch { }
             throw;
         }
         SetStatus($"Bulgu paketi hazır ({notes.Count} not, {files.Count} dosya): {zipPath}");

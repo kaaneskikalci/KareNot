@@ -179,6 +179,21 @@ static class Paths
     public static string HtmlReportFile(string video) => Path.Combine(Dir(video), "rapor.html");
     public static string ExportDir(string video) => Path.Combine(Dir(video), "cikti");
 
+    // The path itself when nothing is there yet, else "name (2).ext", "name (3).ext"... so an export never replaces or fails on
+    // an earlier file of the same name.
+    public static string Unique(string path)
+    {
+        if (!File.Exists(path) && !Directory.Exists(path)) return path;
+        var dir = Path.GetDirectoryName(path) ?? "";
+        var name = Path.GetFileNameWithoutExtension(path);
+        var ext = Path.GetExtension(path);
+        for (int i = 2; ; i++)
+        {
+            var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
+            if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+        }
+    }
+
     // Layout before v1.3, moved by Migration: Desktop\Video Notlari\notlar\<video>.txt and one shared ss\; combined files of all
     // notes on the Desktop (old VLC extension) and in the folder (a v1.3 preview).
     public static string OldDir => Path.Combine(Desktop, "Video Notlari");
