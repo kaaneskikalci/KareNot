@@ -380,6 +380,9 @@ sealed partial class MainForm
         double length = player.LengthMs / 1000.0;
         var outputDir = Paths.ExportDir(currentVideo);
         var output = Path.Combine(outputDir, SafeName(currentVideo) + "_kurgu.mp4");
+        // ffmpeg writes next to it and the result replaces the old video only when it is complete, so a cancelled or failed
+        // run keeps the previous export.
+        var partial = Path.Combine(outputDir, SafeName(currentVideo) + "_kurgu.yaziliyor.mp4");
         return RunExportJob("Kurgu videosu", async ct =>
         {
             SetStatus("Kurgu videosu hazırlanıyor…");
@@ -390,16 +393,19 @@ sealed partial class MainForm
             var extra = (hasAudio ? "" : ", videoda ses yok") + (unpaired > 0 ? $", {unpaired} eşsiz kesim işareti atlandı" : "");
             try
             {
-                var (exit, log) = await Ffmpeg.ApplyEdits2(path, hasAudio, beeps, cuts, length, output,
+                var (exit, log) = await Ffmpeg.ApplyEdits2(path, hasAudio, beeps, cuts, length, partial,
                     t => Ui(() => SetStatus($"Kurgu videosu: %{(outLength > 0 ? Math.Clamp(t / outLength * 100, 0, 100) : 0):0} — " +
                         $"{beeps.Count} bip, {cuts.Count} kesim{extra} (Dışa aktar ▾ > İptal)")), ct);
                 if (exit != 0) throw new InvalidOperationException(FfmpegError(log));
             }
             catch
             {
-                try { File.Delete(output); } catch { }
+                try { File.Delete(partial); } catch { }
                 throw;
             }
+            // The old export may be open in a player: then the new one stays under its temporary name instead of being lost.
+            try { File.Move(partial, output, true); }
+            catch (IOException ex) { throw new IOException($"{ex.Message} Yeni video şurada duruyor: {partial}", ex); }
             SetStatus($"Kurgu videosu hazır ({beeps.Count} bip, {cuts.Count} kesim, {Reports.Duration(outLength)}{extra}): {output}");
             Reveal(output);
         });
