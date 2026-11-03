@@ -5,6 +5,8 @@ versions are the Git tags (`v1.4`, …) that the release workflow builds.
 
 ## [Unreleased]
 
+## [1.5] - 2026-11-03
+
 ### Fixed
 - Times after the first minute were shown and written one tenth of a second too early in about 4% of cases
   (e.g. 60.3 s as `00:01:00.2`) because of floating-point rounding; `NaN` printed as `00:00:NaN`.
@@ -87,7 +89,8 @@ versions are the Git tags (`v1.4`, …) that the release workflow builds.
 ## [1.0] - 2026-10-28
 - First release ("Video Notları"): timestamped notes on video recordings with screenshots.
 
-[Unreleased]: https://github.com/kaaneskikalci/KareNot/compare/v1.4...HEAD
+[Unreleased]: https://github.com/kaaneskikalci/KareNot/compare/v1.5...HEAD
+[1.5]: https://github.com/kaaneskikalci/KareNot/compare/v1.4...v1.5
 [1.4]: https://github.com/kaaneskikalci/KareNot/compare/v1.3...v1.4
 [1.3]: https://github.com/kaaneskikalci/KareNot/compare/v1.2...v1.3
 [1.2]: https://github.com/kaaneskikalci/KareNot/compare/v1.1...v1.2
