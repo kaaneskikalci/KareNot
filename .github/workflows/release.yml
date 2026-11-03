@@ -1,0 +1,60 @@
+name: Release
+
+# Runs when a version tag is pushed, e.g.:  git tag v1.5 && git push origin v1.5
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test tests/KareNot.Tests/KareNot.Tests.csproj -c Release
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          # v1.5 -> 1.5, v1.5.2 -> 1.5.2; anything after a '-' (v1.5-beta) is kept as the informational version.
+          $version = $env:TAG.TrimStart('v')
+          $numeric = ($version -split '-')[0]
+          dotnet publish KareNot.csproj -c Release -o yayin `
+            -p:Version=$numeric -p:InformationalVersion=$version
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $zip = "KareNot-$env:TAG-win-x64.zip"
+          New-Item -ItemType Directory -Force paket | Out-Null
+          Copy-Item yayin/KareNot.exe, README.md, CHANGELOG.md paket/
+          Compress-Archive -Path paket/* -DestinationPath $zip -Force
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $zip" } | Out-File "$zip.sha256" -Encoding ascii
+
+      - name: Create or update the GitHub release
+        shell: pwsh
+        run: |
+          # A release written by hand for this tag is kept; only the files are (re)uploaded.
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $env:ZIP "$env:ZIP.sha256" --clobber
+          } else {
+            gh release create $env:TAG $env:ZIP "$env:ZIP.sha256" --title "KareNot $($env:TAG.TrimStart('v'))" --generate-notes
+          }
