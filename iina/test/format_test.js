@@ -185,6 +185,22 @@ test("report", () => {
     "### Bip (küfür)\n\n- **00:00:05.0** — (açıklama yok) [bitiş 00:00:06.2]\n\n");
 });
 
+test("nfc composes macOS file names", () => {
+  assert.strictEqual(F.nfc("Test ğüş.mp4"), "Test ğüş.mp4");
+  assert.strictEqual(F.nfc("Test ğüş.mp4"), "Test ğüş.mp4");
+  assert.strictEqual(F.nfc(null), null);
+});
+
+test("webviewJson survives IINA's String.raw wrapper", () => {
+  // JavascriptMessageHub.postMessage: arg = "String.raw`" + JSON of the object + "`", then the webview's
+  // iina._emit JSON.parses it. Simulated here with JSON.stringify for JSONSerialization.
+  const viaIina = (obj) => JSON.parse(eval("String.raw`" + JSON.stringify(obj) + "`"));   // eslint-disable-line no-eval
+  const state = { video: "a`b ${x} $y\\z\".mp4", game: [{ text: "`${1+1}` \\` ç   😀" }] };
+  assert.throws(() => viaIina(state));                       // the object itself breaks the wrapper
+  const got = viaIina({ json: F.webviewJson(state) });
+  assert.deepStrictEqual(JSON.parse(got.json), state);
+});
+
 test("review json keeps other entries", () => {
   assert.deepStrictEqual(F.parseReview("[1,2]"), {});
   assert.deepStrictEqual(F.parseReview("bozuk"), {});

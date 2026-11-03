@@ -142,6 +142,19 @@ function sameFolderName(a, b) {
   return String(a).normalize("NFC").toUpperCase() === String(b).normalize("NFC").toUpperCase();
 }
 
+// macOS may hand over file names decomposed (NFD: "ğ" as g + breve) while Windows writes them composed (NFC); video
+// names are compared and written in NFC so Turkish-named videos match their notes on both systems.
+function nfc(s) {
+  return s == null ? s : String(s).normalize("NFC");
+}
+
+// IINA passes an object message to a webview as String.raw`<JSON>` (JavascriptMessageHub.swift), where a backtick ends
+// the string and "${" starts a substitution. This returns the JSON text with "`" and "$" written as \u escapes; send it
+// as a string field and JSON.parse it in the webview.
+function webviewJson(value) {
+  return JSON.stringify(value).replace(/`/g, "\\u0060").replace(/\$/g, "\\u0024");
+}
+
 // Same note: same video, kind, text and seconds as written in the file (two decimals).
 function noteKey(n) {
   return n.video + "\t" + num2(n.t) + "\t" + n.kind + "\t" + clean(n.text);
@@ -351,6 +364,6 @@ function parseReview(text) {
 module.exports = {
   HEADER, GAME_KINDS, EDIT_KINDS, ALL_KINDS, STATUSES, STATUS_LABELS, SEVERITIES, SEVERITY_LABELS,
   isEdit, isGame, label, color, reportTitle, pad, fmt, fmtShort, num2, clean, parseNum, safeFileName,
-  videoFolderName, sameFolderName, noteKey, mergeNotes, mergeReview, findShot,
+  videoFolderName, sameFolderName, nfc, webviewJson, noteKey, mergeNotes, mergeReview, findShot,
   parseNotes, noteLine, serialize, sortNotes, cuts, escapeDataString, buildReport, shotName, parseReview,
 };
