@@ -21,6 +21,25 @@ test("fmt floors tenths", () => {
   assert.strictEqual(F.fmt(360000), "100:00:00.0");
 });
 
+test("fmt keeps the tenth after the first minute (same fix as NoteStore.Fmt)", () => {
+  assert.strictEqual(F.fmt(60.3), "00:01:00.3");     // 60.3 % 60 is 0.2999..., used to give 00:01:00.2
+  assert.strictEqual(F.fmt(3600.7), "01:00:00.7");
+  assert.strictEqual(F.fmt(NaN), "00:00:00.0");
+  assert.strictEqual(F.fmt(Infinity), "00:00:00.0");
+  // Every two-decimal value up to 3 h, as read back from the seconds column: the tenth is the floored hundredths / 10.
+  for (let k = 0; k <= 3 * 3600 * 100; k++) {
+    const tenths = Math.floor(k / 10);
+    const want = pad2(Math.floor(tenths / 36000)) + ":" + pad2(Math.floor(tenths / 600) % 60) + ":" +
+      pad2(Math.floor(tenths / 10) % 60) + "." + (tenths % 10);
+    const t = parseFloat(F.num2(k / 100));
+    if (F.fmt(t) !== want) assert.fail("fmt(" + F.num2(t) + ") = " + F.fmt(t) + ", expected " + want);
+  }
+});
+
+function pad2(n) {
+  return n < 10 ? "0" + n : String(n);
+}
+
 test("num2 is invariant two decimals", () => {
   assert.strictEqual(F.num2(65.4), "65.40");
   assert.strictEqual(F.num2(0), "0.00");
