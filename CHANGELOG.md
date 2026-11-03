@@ -30,6 +30,7 @@ versions are the Git tags (`v1.4`, …) that the release workflow builds.
 - GitHub Actions: build and test on Windows for every push and pull request (plus the IINA format tests on node), and a
   release workflow that builds `KareNot-<tag>-win-x64.zip` when a `v*` tag is pushed.
 - English README, Turkish guide in `README.tr.md`, `CONTRIBUTING.md` and this changelog.
+- MIT license (`LICENSE`).
 
 ### Changed
 - Releases built by the workflow ship a ZIP (`KareNot.exe`, README, CHANGELOG) with a SHA-256 checksum instead of the

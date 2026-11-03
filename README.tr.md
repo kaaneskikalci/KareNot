@@ -137,3 +137,7 @@ Test modu: `KareNot.exe --selftest <log dosyası> <video>` (veri klasörü için
 klasörde ikinci bir video olmalı; test fareyi kısa süre hareket ettirir).
 
 Ayrıntılar, sürüm çıkarma ve katkı: [CONTRIBUTING.md](CONTRIBUTING.md). Değişiklikler: [CHANGELOG.md](CHANGELOG.md).
+
+## Lisans
+
+KareNot [MIT Lisansı](LICENSE) ile yayımlanır. © 2026 Kaan Eskikalci.

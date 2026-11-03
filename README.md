@@ -2,6 +2,8 @@
 
 # KareNot
 
+*English · [Türkçe](README.tr.md)*
+
 [![CI](https://github.com/kaaneskikalci/KareNot/actions/workflows/ci.yml/badge.svg)](https://github.com/kaaneskikalci/KareNot/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/kaaneskikalci/KareNot)](https://github.com/kaaneskikalci/KareNot/releases)
 
@@ -168,3 +170,7 @@ dotnet publish KareNot.csproj -c Release -o yayin
 
 Output: `yayin\KareNot.exe` (framework-dependent single file). Tests: `dotnet test tests/KareNot.Tests`. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for details and the release process, and [CHANGELOG.md](CHANGELOG.md) for the history.
+
+## License
+
+KareNot is released under the [MIT License](LICENSE). © 2026 Kaan Eskikalci.
