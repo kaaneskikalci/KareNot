@@ -84,6 +84,9 @@ The video's folder must contain a second video. Results are written to the log f
    git push origin v1.5
    ```
 
-3. `release.yml` runs the tests, publishes with that version, and attaches `KareNot-v1.5-win-x64.zip` and its `.sha256`
-   to the GitHub release (creating it with generated notes, or adding the files to a release you already wrote for that
-   tag). Edit the release notes afterwards if needed.
+3. `release.yml` runs the tests, publishes with that version, and attaches three files to the GitHub release (creating
+   it with generated notes, or adding the files to a release you already wrote for that tag):
+   - `KareNot-v1.5-win-x64.zip` (`KareNot.exe`, README, CHANGELOG) and its `.sha256`;
+   - the bare `KareNot.exe`, so links to `releases/latest/download/KareNot.exe` from v1.0–v1.4 keep working.
+
+   Edit the release notes afterwards if needed.

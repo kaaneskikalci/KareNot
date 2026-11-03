@@ -58,7 +58,9 @@ It was built for the playtests of indie games such as KILLSTREAM. The user inter
 2. Download `KareNot-<version>-win-x64.zip` from [Releases](https://github.com/kaaneskikalci/KareNot/releases), extract it
    to a folder you can write to (not `Program Files`) and run `KareNot.exe`.
    The exe is not signed: on the SmartScreen warning choose *More info → Run anyway*.
-   Releases up to v1.4 ship the bare `KareNot.exe` instead of a ZIP.
+   Each release also has the bare `KareNot.exe` (releases up to v1.4 have only that), so
+   [`releases/latest/download/KareNot.exe`](https://github.com/kaaneskikalci/KareNot/releases/latest/download/KareNot.exe)
+   always points to the newest exe.
 3. Optional: set the ffmpeg and whisper paths in *Araçlar ▾ → Ayarlar* (Tools → Settings).
 
 Notes are saved in a `KareNot Notlar` folder next to `KareNot.exe` (or `Desktop\KareNot` when that folder is not

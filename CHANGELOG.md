@@ -33,8 +33,8 @@ versions are the Git tags (`v1.4`, …) that the release workflow builds.
 - MIT license (`LICENSE`).
 
 ### Changed
-- Releases built by the workflow ship a ZIP (`KareNot.exe`, README, CHANGELOG) with a SHA-256 checksum instead of the
-  bare exe.
+- Releases built by the workflow ship a ZIP (`KareNot.exe`, README, CHANGELOG) with a SHA-256 checksum. The bare
+  `KareNot.exe` is still attached, so `releases/latest/download/KareNot.exe` links keep working.
 
 ### Known issues
 - The IINA plugin (`iina/`) has never been run on a Mac. A static review found likely blocking problems: the sidebar

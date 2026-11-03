@@ -20,7 +20,8 @@ Windows uygulaması. KILLSTREAM gibi indie oyunların playtest kayıtları için
 
 1. **VLC media player (64 bit)** kurulu olmalı: <https://www.videolan.org/vlc/>. Uygulama VLC'nin oynatıcı motorunu kullanır.
 2. [Releases](../../releases) sayfasından `KareNot-<sürüm>-win-x64.zip` dosyasını indir, yazılabilir bir klasöre aç
-   (`Program Files` değil) ve `KareNot.exe`'yi çalıştır. (v1.4'e kadarki sürümlerde doğrudan `KareNot.exe` vardı.)
+   (`Program Files` değil) ve `KareNot.exe`'yi çalıştır. Her sürümde ayrıca tek başına `KareNot.exe` de var (v1.4'e
+   kadarki sürümlerde yalnız o vardı); `releases/latest/download/KareNot.exe` bağlantısı hep en yeni exe'yi indirir.
    - Windows **.NET 10 Desktop Runtime** isterse açılan linkten kur (<https://dotnet.microsoft.com/download/dotnet/10.0>, x64).
    - SmartScreen uyarısında: *Ek bilgi* → *Yine de çalıştır* (exe imzasız).
 3. İsteğe bağlı: **ffmpeg** (klip, önizleme, bipli/kesilmiş video, ölü an tespiti): `winget install Gyan.FFmpeg`.
