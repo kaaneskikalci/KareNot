@@ -65,4 +65,18 @@ public class CutAndRangeTests
         Assert.Equal(new (double, double?)[] { (0, 10), (20, null) }, Ffmpeg.KeptParts(new List<(double, double)> { (10, 20) }, 0));
         Assert.Empty(Ffmpeg.KeptParts(new List<(double, double)> { (0, 60) }, 60));
     }
+
+    [Theory]
+    [InlineData(60, 5, 5, 55, 10)]
+    [InlineData(2, 5, 5, 0, 7)]      // regression: was 0..10, i.e. 8 s after the note instead of 5
+    [InlineData(0, 5, 5, 0, 5)]
+    [InlineData(10, 0, 3, 10, 3)]
+    [InlineData(-1, 5, 5, 0, 5)]
+    [InlineData(10, 0, 0, 10, 0.1)]  // never an empty clip
+    public void ClipRange_ends_after_seconds_after_the_note_even_near_the_start(double t, double before, double after, double start, double duration)
+    {
+        var r = Ffmpeg.ClipRange(t, before, after);
+        Assert.Equal(start, r.Start, 9);
+        Assert.Equal(duration, r.Duration, 9);
+    }
 }

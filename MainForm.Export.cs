@@ -244,7 +244,8 @@ sealed partial class MainForm
             SetStatus($"Klip çıkarılıyor: {NoteStore.Fmt(n.T)} (−{settings.ClipBefore:0.#} / +{settings.ClipAfter:0.#} sn)…");
             try
             {
-                var (exit, log) = await Ffmpeg.Clip(path, n.T - settings.ClipBefore, settings.ClipBefore + settings.ClipAfter, output, ct);
+                var (start, duration) = Ffmpeg.ClipRange(n.T, settings.ClipBefore, settings.ClipAfter);
+                var (exit, log) = await Ffmpeg.Clip(path, start, duration, output, ct);
                 if (exit != 0) throw new InvalidOperationException(FfmpegError(log));
             }
             catch
